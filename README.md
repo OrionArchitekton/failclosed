@@ -2,6 +2,8 @@
 
 Fail-closed merge admission control for agent-written code.
 
+![failclosed gate: run the reviewer, distrust the verdict, halt on ambiguity](assets/gate-diagram.png)
+
 ## The problem
 
 AI coding agents write and merge code faster than review can govern it. Most
