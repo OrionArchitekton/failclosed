@@ -1,0 +1,36 @@
+# failclosed configuration (optional).
+#
+# Copy to `failclosed.toml`. Every key falls back to a built-in default, so
+# this file is never required to run. TOML overrides need Python 3.11+; on
+# older interpreters the inline defaults are used.
+
+# Branches treated as trunk. Pushes to these are skipped (they are not PRs).
+trunk_branches = ["main", "master"]
+
+# Reviewer provider seam. The command receives the review prompt on STDIN and
+# must return the reviewer's output on STDOUT. failclosed does not trust the
+# reviewer's verdict: the output is parsed, and the gate refuses MERGE_READY on
+# unparseable, schema-invalid, or self-contradictory output. Any command that
+# honors the stdin -> stdout contract works. The seam is vendor-neutral.
+reviewer_command = "codex exec --json -"
+
+# Seconds to wait for review bots to land before the first phase.
+bot_wait_seconds = 240
+
+# Findings at or above this priority are auto-fixed. Lower are informational.
+fix_threshold = "P2"
+
+# Per-review subprocess timeout, in seconds.
+reviewer_timeout_seconds = 600
+
+# Run a second, adversarial review pass after the standard one.
+adversarial_review = true
+
+# Working directory for temporary review worktrees.
+worktree_dir = "/tmp"
+
+# Only resolve bot threads older than this, in minutes.
+min_thread_age_minutes = 30
+
+# Maximum auto-fix cycles per run.
+max_fix_cycles = 1

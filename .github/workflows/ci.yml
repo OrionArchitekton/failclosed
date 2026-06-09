@@ -1,0 +1,36 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff pytest
+      - name: Lint
+        run: ruff check .
+      - name: Tests
+        run: pytest -q
+
+  leak-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: No absolute home paths in tracked files
+        run: |
+          if grep -rnE '/(home|Users)/[A-Za-z0-9._-]+' \
+               --include='*.py' --include='*.toml' --include='*.yaml' --include='*.md' .; then
+            echo "::error::absolute home path found in a tracked file"
+            exit 1
+          fi
+          echo "no absolute home paths"
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

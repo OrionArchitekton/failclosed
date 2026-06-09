@@ -1,0 +1,14 @@
+# Bot authors whose review threads can be auto-resolved.
+# Exact matches checked first, then regex patterns.
+bot_authors:
+  - "github-actions[bot]"
+  - "gitleaks[bot]"
+  - "copilot-pull-request-reviewer"
+  - "gemini-code-assist"
+
+# Regex patterns applied if no exact match.
+# Matched against the full author login string.
+bot_patterns:
+  - "\\[bot\\]$"
+  - "^copilot-"
+  - "^gemini-"
