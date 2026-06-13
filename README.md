@@ -1,5 +1,9 @@
 # failclosed
 
+![License: MIT](https://img.shields.io/github/license/OrionArchitekton/failclosed?style=flat&color=1a1a1a)
+![CI](https://github.com/OrionArchitekton/failclosed/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/Python-1a1a1a?style=flat&logo=python&logoColor=3776AB)
+
 Fail-closed merge admission control for agent-written code.
 
 ![failclosed gate: run the reviewer, distrust the verdict, halt on ambiguity](assets/gate-diagram.png)
