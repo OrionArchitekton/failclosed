@@ -5,6 +5,11 @@ bot_authors:
   - "gitleaks[bot]"
   - "copilot-pull-request-reviewer"
   - "gemini-code-assist"
+  # The Codex GitHub reviewer app posts review threads as this login (no [bot]
+  # suffix, not ^gemini-/^copilot-). Without it, unresolved Codex threads are
+  # dropped before the remaining-threads count and the gate can return
+  # MERGE_READY with an open Codex P1 thread still unresolved (fail-open).
+  - "chatgpt-codex-connector"
 
 # Regex patterns applied if no exact match.
 # Matched against the full author login string.
@@ -12,3 +17,4 @@ bot_patterns:
   - "\\[bot\\]$"
   - "^copilot-"
   - "^gemini-"
+  - "^chatgpt-codex"

@@ -14,6 +14,7 @@ from parse_codex_output import (
     findings_at_or_above,
     fixable_findings,
     parse_codex_review,
+    parse_native_review_stdout,
     unfixable_findings,
 )
 
@@ -240,3 +241,53 @@ class TestFindingFiltering:
 
         fixable_low = fixable_findings(result["findings"], "low")
         assert len(fixable_low) == 2
+
+
+class TestNativeReviewParsing:
+    """The native-text route (review --json emits rendered text, no outputSchema).
+
+    codex CLI >=~0.13x renders findings as '[P1] Title — path:start-end' — a
+    P-level severity marker and a trailing em-dash path:range, with no 'Verdict:'
+    line. The parser must recognize this layout, or current Codex output is treated
+    as unparseable and the gate never reaches a clean MERGE_READY.
+    """
+
+    def test_p_level_emdash_trailing_path(self):
+        # The codex >=~0.13x layout: P-level marker + title + ' — path:start-end'.
+        stdout = "- [P1] Missing auth check — src/auth.py:42-48"
+        result = parse_native_review_stdout(stdout)
+        assert result["parse_path"] == "native_text"
+        assert len(result["findings"]) == 1
+        f = result["findings"][0]
+        assert f["severity"] == "high"          # P1 -> high
+        assert f["file"] == "src/auth.py"
+        assert f["line_start"] == 42
+        assert "Missing auth check" in f["title"]
+
+    def test_p_level_severity_mapping(self):
+        for marker, severity in (("P0", "critical"), ("P1", "high"),
+                                 ("P2", "medium"), ("P3", "low")):
+            stdout = f"- [{marker}] Some issue — pkg/mod.py:1"
+            result = parse_native_review_stdout(stdout)
+            assert len(result["findings"]) == 1, marker
+            assert result["findings"][0]["severity"] == severity, marker
+            assert result["findings"][0]["file"] == "pkg/mod.py", marker
+
+    def test_legacy_severity_word_marker_still_parses(self):
+        # Regression: the older '[high] path:line Title' layout must keep working.
+        stdout = "- [high] src/db.py:7 SQL injection risk"
+        result = parse_native_review_stdout(stdout)
+        assert len(result["findings"]) == 1
+        f = result["findings"][0]
+        assert f["severity"] == "high"
+        assert f["file"] == "src/db.py"
+        assert f["line_start"] == 7
+
+    def test_p_level_finding_without_file_fails_closed(self):
+        # A P-level finding (verdict implied 'fix') whose parser extracts no file is
+        # a contradictory state -> schema_valid False so the gate blocks MERGE_READY.
+        stdout = "- [P1] A design concern with no file reference"
+        result = parse_native_review_stdout(stdout)
+        assert result["verdict"] == "fix"
+        assert result["schema_valid"] is False
+        assert "findings_with_file" in result["missing_fields"]
