@@ -99,9 +99,135 @@ class TestClassifyThread(unittest.TestCase):
         thread = {"path": None, "line": None, "isResolved": False, "body": "Review receipt emitted. No issues found."}
         self.assertEqual(classify_thread(thread), "informational")
 
-    def test_informational_summary(self) -> None:
+    def test_weak_keywords_no_longer_informational(self) -> None:
+        # 'summary' / 'all checks' / 'passed' / 'acknowledged' are too weak to
+        # auto-resolve: a REAL finding can contain them ("Summary: X passed but Y
+        # is broken"), and auto-resolving on them silently dismisses real findings.
+        # Err safe -> code_fix; only unambiguous receipt phrases resolve.
         thread = {"path": None, "line": None, "isResolved": False, "body": "Summary: all checks passed. Acknowledged."}
-        self.assertEqual(classify_thread(thread), "informational")
+        self.assertEqual(classify_thread(thread), "code_fix")
+
+    def test_unambiguous_receipt_phrases_still_informational(self) -> None:
+        for body in (
+            "Automated receipt.",
+            "No issues found.",
+            "No findings.",
+            "No action required.",
+            "This is informational only.",
+        ):
+            thread = {"path": None, "line": None, "isResolved": False, "body": body}
+            self.assertEqual(classify_thread(thread), "informational", body)
+
+    def test_real_finding_with_weak_keyword_is_code_fix(self) -> None:
+        # A pathless but REAL finding whose prose happens to contain a weak keyword
+        # must NOT be auto-resolved.
+        for body in (
+            "Summary: the retry loop can spin forever.",
+            "This passed CI but leaks a file handle.",
+            "Acknowledged earlier, but the race is still open.",
+        ):
+            thread = {"path": None, "line": None, "isResolved": False, "body": body}
+            self.assertEqual(classify_thread(thread), "code_fix", body)
+
+    def test_receipt_or_informational_as_plain_word_is_code_fix(self) -> None:
+        # Regression: "receipt" and "informational" used to be bare-substring
+        # informational keywords, so a real pathless finding that merely USES those
+        # words as ordinary nouns/adjectives was silently auto-resolved. They are now
+        # anchored to receipt-context phrases; a real finding mentioning them must
+        # default to code_fix so the thread stays open.
+        for body in (
+            "Receipt upload corrupts totals.",
+            "This is not informational: token leak remains.",
+            "Summary: receipt totals are wrong.",
+            "The informational banner does not escape user input (XSS).",
+            "A receipt is generated, but the amount is double-charged.",
+        ):
+            thread = {"path": None, "line": None, "isResolved": False, "body": body}
+            self.assertEqual(classify_thread(thread), "code_fix", body)
+
+    def test_receipt_phrase_inside_long_actionable_body_is_code_fix(self) -> None:
+        # Even the multi-word receipt PHRASES ("no findings", "no action required",
+        # "no issues found") must not auto-resolve a real finding that merely OPENS
+        # with the phrase and continues with a diagnostic claim. Receipt-shape gate:
+        # a diagnostic continuation marker (when/even/though/...) or a long body
+        # keeps the thread open.
+        for body in (
+            "No findings are emitted when the structured parser fails closed.",
+            "No action required is reported even when the merge gate is failing.",
+            "No issues found is incorrectly printed even though tests fail.",
+            "No findings but the race condition is still open.",
+            "For your information, this silently drops the audit receipt and "
+            "the totals are wrong.",
+        ):
+            thread = {"path": None, "line": None, "isResolved": False, "body": body}
+            self.assertEqual(classify_thread(thread), "code_fix", body)
+
+    def test_residual_failopen_terse_actionable_bodies_are_code_fix(self) -> None:
+        # Adversarial review (v0.2.0): a continuation-marker DENYLIST is finite and
+        # bypassable — a terse pathless body that opens with a receipt phrase and
+        # uses a connector/verb NOT in the denylist still auto-resolved a REAL
+        # finding (fail-open, the exact class this tool exists to prevent). The
+        # classifier is fail-closed by an allowlist: any non-receipt content word
+        # forces code_fix. These verified breaking inputs must all stay open.
+        for body in (
+            "No findings since v2 broke.",
+            "No findings so merge is unsafe.",
+            "No issues found and crashes.",
+            "For your information, idempotency is broken.",
+            "No findings: silent data corruption.",
+            "for your information SQL injection here",
+            "No action required immediately fix this.",
+            "No findings; nonetheless deadlock here.",
+            "No findings regardless of the leak.",
+            "No findings.\n\nSQLi",
+        ):
+            thread = {"path": None, "line": None, "isResolved": False, "body": body}
+            self.assertEqual(classify_thread(thread), "code_fix", body)
+
+    def test_failopen_nonascii_finding_after_receipt_is_code_fix(self) -> None:
+        # Adversarial re-review (v0.2.0): an ASCII-only tokenizer cannot see a finding
+        # written in a non-Latin script or with fullwidth homoglyphs, so an
+        # "every word must be receipt vocab" check passes vacuously and auto-resolves
+        # a real non-English finding. The content check must be Unicode-aware (and
+        # NFKC-normalize homoglyphs). These all carry a real finding and must stay open.
+        for body in (
+            "No findings. Авторизация сломана",          # Russian: auth is broken
+            "No findings. 注入漏洞",                       # Chinese: injection vuln
+            "No findings. ثغرة أمنية",                    # Arabic: security hole
+            "No action required. Данные удаляются",        # Russian: data is deleted
+            "No findings. ＲＣＥ ｉｎ ａｕｔｈ",  # fullwidth 'RCE in auth'
+        ):
+            thread = {"path": None, "line": None, "isResolved": False, "body": body}
+            self.assertEqual(classify_thread(thread), "code_fix", body)
+
+    def test_failopen_vocab_only_negation_is_code_fix(self) -> None:
+        # Adversarial re-review (v0.2.0): a flat bag-of-words allowlist admits its own
+        # negation — "no action required" (receipt) and "action required" (the
+        # opposite) share vocabulary, so a body built only from vocab tokens can still
+        # ASSERT that action is required. Matching the receipt phrase as a UNIT and
+        # rejecting any residual content word outside it closes this.
+        for body in (
+            "No findings. Action required.",
+            "No issues found. Action required.",
+            "Review required. No issues found.",
+            "No findings. Review required.",
+            "No action required. Review your findings.",
+        ):
+            thread = {"path": None, "line": None, "isResolved": False, "body": body}
+            self.assertEqual(classify_thread(thread), "code_fix", body)
+
+    def test_terse_receipt_bodies_still_informational(self) -> None:
+        # The shape gate must NOT over-tighten: genuine terse receipts still resolve.
+        for body in (
+            "Automated receipt.",
+            "No issues found.",
+            "No findings.",
+            "No action required.",
+            "Review receipt emitted. No issues found.",
+            "This is informational only.",
+        ):
+            thread = {"path": None, "line": None, "isResolved": False, "body": body}
+            self.assertEqual(classify_thread(thread), "informational", body)
 
     def test_code_fix_with_path_but_vague_body(self) -> None:
         # Has a path → code_fix regardless of vague body.
@@ -141,6 +267,19 @@ class TestFilterAndClassify(unittest.TestCase):
         self.assertNotIn("T3", ids)
         self.assertIn("T4", ids)
 
+    def test_codex_connector_thread_retained_with_real_config(self) -> None:
+        # The Codex GitHub reviewer authors threads as 'chatgpt-codex-connector'.
+        # With the shipped allowlist it must be retained (not dropped as human),
+        # else an unresolved Codex P1 thread is invisible to the final-sweep
+        # gate and MERGE_READY can be emitted with it still open (fail-open).
+        config_path = Path(__file__).resolve().parent / "bot_authors.yaml"
+        config = load_bot_config(config_path)
+        codex = _make_thread(
+            thread_id="TC", author_login="chatgpt-codex-connector", is_resolved=False
+        )
+        result = filter_and_classify([codex], config)
+        self.assertIn("TC", [t["id"] for t in result])
+
 
 # ---------------------------------------------------------------------------
 # TestLoadBotConfig
@@ -154,6 +293,16 @@ class TestLoadBotConfig(unittest.TestCase):
         self.assertIn("bot_authors", config)
         self.assertIn("bot_patterns", config)
         self.assertIn("github-actions[bot]", config["bot_authors"])
+
+    def test_codex_connector_in_real_allowlist(self) -> None:
+        """The Codex GitHub reviewer posts as 'chatgpt-codex-connector' (no [bot]
+        suffix, not ^gemini-/^copilot-), so it must be recognized by the SHIPPED
+        allowlist. Otherwise its unresolved review threads are dropped before the
+        final-sweep remaining-threads count, and the gate can return MERGE_READY
+        with an open Codex P1 thread (fail-open). Regression guard."""
+        config_path = Path(__file__).resolve().parent / "bot_authors.yaml"
+        config = load_bot_config(config_path)
+        self.assertTrue(is_bot_author("chatgpt-codex-connector", config))
 
     def test_defaults_when_missing(self) -> None:
         """Nonexistent path returns sensible defaults (non-empty dicts/lists)."""

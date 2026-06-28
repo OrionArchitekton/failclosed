@@ -168,8 +168,22 @@ def _unparseable_result(parse_warnings: List[str]) -> Dict[str, Any]:
 
 _VERDICT_RE = re.compile(r"(?im)^verdict\s*:[ \t]*(.+?)[ \t]*$")
 _FINDING_MARKER_RE = re.compile(
-    r"(?im)^[-*]\s*\[(critical|high|medium|low)\]\s*"
+    r"(?im)^[-*]\s*\[(critical|high|medium|low|P[0-3])\]\s*"
     r"(?P<rest>.*?)$"
+)
+
+# codex CLI >=~0.13x native review renders '[P1] Title — abs/path:start-end'
+# (P-level marker + trailing em-dash path:range, no Verdict line). Map
+# P-levels onto the canonical severity enum.
+_P_LEVEL_SEVERITY = {"p0": "critical", "p1": "high", "p2": "medium", "p3": "low"}
+
+# Trailing ' — path[:start[-end]]' layout (em-dash, en-dash, or ' -- ').
+# Anchored at end-of-line; path must be path-shaped per _is_path_shaped.
+_TRAILING_EMDASH_PATH_RE = re.compile(
+    r"^(?P<title>.+?)\s+(?:[—–]|--)\s+"
+    r"(?P<file>[\w./~-]+)"
+    r"(?::(?P<line>\d+)(?:[:-](?P<line_end>\d+))?)?"
+    r"[ \t.,;]*$"
 )
 # Path-shape rule: token is path-shaped iff it has '/' OR ends with .<2+ alphanumeric>.
 # Backticked tokens skip this check (the backticks are the explicit caller signal).
@@ -239,6 +253,12 @@ def _split_file_from_body(rest: str) -> tuple[Optional[str], Optional[int], str]
         body = (rest[:paren.start("prefix")] + paren.group("prefix") + rest[paren.end():]).strip()
         return file, line, body
 
+    # codex >=~0.13x layout: 'Title — path:start-end' (path trails the title).
+    emdash = _TRAILING_EMDASH_PATH_RE.match(rest)
+    if emdash and _is_path_shaped(emdash.group("file")):
+        line = int(emdash.group("line")) if emdash.group("line") else None
+        return emdash.group("file"), line, emdash.group("title").strip()
+
     return None, None, rest.strip()
 
 
@@ -276,11 +296,12 @@ def parse_native_review_stdout(stdout: str) -> Dict[str, Any]:
 
     findings: List[Dict[str, Any]] = []
     for m in _FINDING_MARKER_RE.finditer(stdout):
-        severity = m.group(1)
+        severity = m.group(1).lower()
+        severity = _P_LEVEL_SEVERITY.get(severity, severity)
         rest = m.group("rest") or ""
         file, line, body = _split_file_from_body(rest)
         findings.append({
-            "severity": severity.lower(),
+            "severity": severity,
             "file": file,
             "line_start": line,
             "line_end": None,

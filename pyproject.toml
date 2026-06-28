@@ -1,6 +1,6 @@
 [project]
 name = "failclosed"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fail-closed merge admission control for agent-written code: run an LLM reviewer, distrust its verdict, refuse MERGE_READY on unparseable or self-contradictory output."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -14,7 +14,7 @@ Homepage = "https://danmercede.com"
 [project.optional-dependencies]
 dev = ["ruff", "pytest"]
 
-# v0.1 runs from a clone (`python run_review_pipeline.py ...`). Packaging into
+# Runs from a clone (`python run_review_pipeline.py ...`). Packaging into
 # an installable distribution (a proper package layout with relative imports)
 # is a tracked follow-up; it is deliberately not promised here.
 

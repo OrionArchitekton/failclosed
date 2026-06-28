@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -29,16 +30,36 @@ from typing import Dict, List, Optional
 # Informational keyword list for classify_thread
 # ---------------------------------------------------------------------------
 
+# A pathless bot thread auto-resolves to "informational" ONLY when its body is a
+# PURE receipt: it contains a known receipt PHRASE, and once every matched phrase is
+# carved out, NO alphanumeric content remains. This is fail-closed by construction —
+# any character the carve-out leaves behind keeps the thread OPEN.
+#
+# Two earlier designs leaked:
+#   - a substring DENYLIST (weak words like "summary"/"passed") auto-resolved a real
+#     finding that merely USED one of those words;
+#   - a continuation-marker denylist + word bag-of-words allowlist was bypassable two
+#     ways: a connector NOT in the finite marker list ("No findings since v2 broke"),
+#     and a vocabulary that admits its own negation ("No findings. Action required."
+#     — every word is receipt vocab, yet it ASSERTS action is required). An ASCII-only
+#     tokenizer was also blind to non-Latin findings ("No findings. Авторизация
+#     сломана") and fullwidth homoglyphs, which then passed the all-words check
+#     vacuously.
+# The phrase-span carve-out matches the receipt as a UNIT (no free word recombination)
+# and the residual check is Unicode-aware (str.isalnum() + NFKC normalization), so a
+# finding in any script, or a homoglyph, leaves residual content and forces code_fix.
+# Adding a phrase here can only ever DISMISS a thread, so each must be a phrase that
+# cannot itself carry an actionable finding.
 _INFORMATIONAL_KEYWORDS = [
-    "receipt",
-    "summary",
-    "acknowledged",
+    "automated receipt",
+    "review receipt",
+    "receipt emitted",
     "no issues found",
-    "passed",
     "no findings",
-    "all checks",
-    "informational",
     "no action required",
+    "informational only",
+    "this is informational",
+    "for your information",
 ]
 
 # ---------------------------------------------------------------------------
@@ -144,19 +165,47 @@ def classify_thread(thread: dict) -> str:
 
     Rules (in priority order):
     1. Has a non-None, non-empty path → "code_fix" (points at specific code).
-    2. No path, body matches informational keywords → "informational".
+    2. No path, body is a PURE receipt → "informational". Pure receipt means: the
+       (NFKC-normalized, lowercased) body contains a known receipt phrase, AND after
+       carving out every matched phrase span, no alphanumeric character remains. The
+       residual check is Unicode-aware, so a real finding in any script ("No findings.
+       Авторизация сломана"), a fullwidth homoglyph, or a vocab-only negation ("No
+       findings. Action required.") leaves residual content and stays "code_fix".
     3. Default → "code_fix" (err on safe side).
     """
     path = thread.get("path")
     if path:
         return "code_fix"
 
-    body = (thread.get("body") or "").lower()
-    for keyword in _INFORMATIONAL_KEYWORDS:
-        if keyword in body:
-            return "informational"
+    # NFKC collapses fullwidth/homoglyph characters to their canonical form so a
+    # disguised finding cannot hide from the residual check.
+    body = unicodedata.normalize("NFKC", thread.get("body") or "").lower()
 
-    return "code_fix"
+    # Mark the character spans covered by any known receipt phrase. Overlapping
+    # phrases (e.g. "review receipt" / "receipt emitted") are both marked, so the
+    # union is carved out correctly.
+    covered = bytearray(len(body))
+    found_phrase = False
+    for phrase in _INFORMATIONAL_KEYWORDS:
+        start = 0
+        while True:
+            i = body.find(phrase, start)
+            if i < 0:
+                break
+            found_phrase = True
+            for j in range(i, i + len(phrase)):
+                covered[j] = 1
+            start = i + 1  # allow overlapping matches
+
+    if not found_phrase:
+        return "code_fix"
+
+    # Any alphanumeric character OUTSIDE a matched receipt phrase is real content —
+    # the receipt phrase was only part of a larger, actionable message. Fail closed.
+    if any(ch.isalnum() for idx, ch in enumerate(body) if not covered[idx]):
+        return "code_fix"
+
+    return "informational"
 
 
 def filter_and_classify(threads: list, config: dict) -> list:
