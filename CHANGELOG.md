@@ -4,6 +4,26 @@ All notable changes to failclosed are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor versions may carry
 behavior changes).
 
+## [Unreleased]
+
+### Added
+
+- **Three-way fix proof** (`three_way_proof.py`). A fix only counts when its
+  regression test fails before the fix, passes after it, and fails again with
+  the fix reverted. In every run the test prints the ran-marker
+  `THREEWAY-RAN:<test-id>` as a whole line, and it prints the pass-marker
+  `THREEWAY-PASS:<test-id>` only where it passed, so no other test's result
+  can stand in for it. Each leg runs in a fresh checkout of a throwaway clone,
+  so the caller's repository is never touched. Test data (fixtures, golden
+  files, snapshots) counts as test paths, so rewriting an expectation is never
+  taken for a fix. Ambiguity fails closed: a missing marker, a timeout, a
+  signal-killed test, or a pass that survives the revert is `NOT_PROVEN`
+  (exit 1); a merge or root commit without `--base`, a base that is not an
+  ancestor of the fix, a fix that touches only tests, a patch that does not
+  apply, a leg tree that cannot be built exactly, a usage error or `--help`, or
+  an internal error is `ERROR` (exit 2). Spec:
+  `specs/three-way-fix-proof-spec.md`.
+
 ## [0.2.0] — 2026-06-28
 
 Gate-hardening release. Two of these were latent **fail-open** paths — a merge

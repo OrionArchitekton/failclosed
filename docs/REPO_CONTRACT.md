@@ -33,6 +33,8 @@ managed deploy or secret scope.
 - multi-shape reviewer-output parser and contradiction checks
 - reviewer command seam and context handling
 - bot comment/thread fetching, classification, and resolution helpers
+- the three-way fix proof check (fail before, pass after, fail on revert, with
+  a ran-marker in every run) and its verdict semantics
 - local configuration example and public OSS documentation
 - repo-local tests, lint config, leak gate, and release/package metadata
 
