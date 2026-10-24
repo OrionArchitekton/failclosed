@@ -643,6 +643,65 @@ def test_receipt_output_hides_local_paths(repo, capsys, tmp_path, monkeypatch):
     assert "three-way-proof-" not in tails
 
 
+# Exits 3 when the test process can see the caller's directory through PWD/OLDPWD.
+PWD_CHECKING_TEST_SCRIPT = (
+    "import os, sys\n"
+    "from calc import add\n"
+    "print('THREEWAY-RAN:add-fix')\n"
+    "pwd = os.environ.get('PWD')\n"
+    "if 'OLDPWD' in os.environ or (pwd and os.path.realpath(pwd) != os.getcwd()):\n"
+    "    sys.exit(3)\n"
+) + exit_on("add(2, 3) == 5")
+
+
+def test_test_process_sees_its_leg_checkout_as_the_working_directory(
+        repo, capsys, monkeypatch):
+    # As if launched from a shell sitting in the caller's repository.
+    monkeypatch.setenv("PWD", str(repo))
+    monkeypatch.setenv("OLDPWD", str(repo))
+    fix = commit_files(
+        repo, {"calc.py": FIXED, "test_calc.py": PWD_CHECKING_TEST_SCRIPT}, "fix: add")
+
+    code, receipt = run_proof(capsys, repo, "--fix", fix, "--test-id", "add-fix",
+                              "--fail-exit-code", "1")
+
+    assert code == 0, receipt["reason"]
+
+
+def test_scratch_directory_failure_is_an_error_without_local_paths(
+        repo, capsys, monkeypatch):
+    fix = commit_files(repo, {"calc.py": FIXED, "test_calc.py": TEST_SCRIPT}, "fix: add")
+
+    def no_usable_temp(*_args, **_kwargs):
+        # The shape tempfile raises: it lists every directory tried, cwd included.
+        raise FileNotFoundError(2, f"No usable temporary directory found in ['/tmp', '{repo}']")
+
+    monkeypatch.setattr(twp.tempfile, "mkdtemp", no_usable_temp)
+
+    code, receipt = run_proof(capsys, repo, "--fix", fix, "--test-id", "add-fix")
+
+    assert_error(code, receipt, "cannot create a scratch directory")
+    assert str(repo) not in receipt["reason"]
+
+
+def test_error_reasons_hide_the_home_directory(repo, capsys, tmp_path, monkeypatch):
+    home = tmp_path / "home-dir"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    fix = commit_files(repo, {"calc.py": FIXED, "test_calc.py": TEST_SCRIPT}, "fix: add")
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError(f"cannot read {home}/secret/thing")
+
+    monkeypatch.setattr(twp, "_ls_tree", boom)
+
+    code, receipt = run_proof(capsys, repo, "--fix", fix, "--test-id", "add-fix")
+
+    assert code == 2
+    assert "~/secret/thing" in receipt["reason"]
+    assert str(home) not in receipt["reason"]
+
+
 # --- S11: an internal crash is still an ERROR receipt, never a silent pass ---
 
 

@@ -152,7 +152,9 @@ python three_way_proof.py --fix HEAD --test-id add-positive --fail-exit-code 1 \
   in a traceback does not count. With pytest, use `-rA` so passing tests show
   their output (or `-s`, printing each marker after a newline).
 - The pass-marker ties each outcome to the marked test: a failing leg that
-  printed it, or a passing leg that did not, is not proven.
+  printed it, or a passing leg that did not, is not proven. Still, select only
+  the marked test: if it stopped early without failing while another test in
+  the command failed, that failure would count.
 - `--fail-exit-code N` counts only exit `N` as a failure (1 for pytest, which
   rules out collection and usage errors). `--timeout SECONDS` bounds each leg.
 - `--json` prints a machine-readable receipt; without it you get a short summary

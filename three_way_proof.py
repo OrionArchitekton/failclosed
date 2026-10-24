@@ -248,8 +248,13 @@ def _kill_group(proc: subprocess.Popen) -> None:
 
 def _execute(cmd: list, cwd: str, timeout: float) -> tuple:
     """Run ``cmd``; return (exit_code, combined output, timed_out)."""
+    env = scrubbed_env()
+    # A shell's PWD/OLDPWD would still name the caller's directory, and code
+    # that trusts $PWD over getcwd() would reach back into the caller's tree.
+    env["PWD"] = cwd
+    env.pop("OLDPWD", None)
     try:
-        proc = subprocess.Popen(cmd, cwd=cwd, env=scrubbed_env(), stdin=subprocess.DEVNULL,
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 start_new_session=True)
     except OSError as exc:
@@ -325,15 +330,19 @@ def _run_leg(leg: str, expect: str, tree: str, cmd: list, cwd: str, marker: str,
     }
 
 
-def _redact_paths(text: str, scratch: str) -> str:
-    """Hide local paths the receipt would otherwise carry into a PR body."""
-    for path in sorted({scratch, os.path.realpath(scratch)}, key=len, reverse=True):
-        text = text.replace(path, "<scratch>")
+def _redact_home(text: str) -> str:
     home = os.path.expanduser("~")
     if home and home != "/" and os.path.isabs(home):
         for path in sorted({home, os.path.realpath(home)}, key=len, reverse=True):
             text = text.replace(path + "/", "~/")
     return text
+
+
+def _redact_paths(text: str, scratch: str) -> str:
+    """Hide local paths the receipt would otherwise carry into a PR body."""
+    for path in sorted({scratch, os.path.realpath(scratch)}, key=len, reverse=True):
+        text = text.replace(path, "<scratch>")
+    return _redact_home(text)
 
 
 # --- the proof ---
@@ -396,7 +405,11 @@ def prove(receipt: dict, repo: str, fix_rev: str | None, fix_diff: str | None,
     common_dir = _git(repo, "rev-parse", "--path-format=absolute",
                       "--git-common-dir").decode().strip()
 
-    scratch = tempfile.mkdtemp(prefix="three-way-proof-")
+    try:
+        scratch = tempfile.mkdtemp(prefix="three-way-proof-")
+    except OSError as exc:  # its message lists every directory tried, cwd included
+        raise ProofError("cannot create a scratch directory in the system temp location "
+                         f"({type(exc).__name__})") from None
     try:
         clone = os.path.join(scratch, "clone")
         _git(scratch, "clone", "--quiet", "--shared", "--no-checkout", common_dir, clone)
@@ -557,10 +570,10 @@ def main(argv: list | None = None) -> int:
         prove(receipt, os.path.abspath(args.repo), args.fix, args.fix_diff, args.base,
               args.test_id, cmd, args.timeout, args.fail_exit_code, args.test_path)
     except ProofError as exc:
-        receipt.update(verdict=ERROR, reason=str(exc))
+        receipt.update(verdict=ERROR, reason=_redact_home(str(exc)))
     except Exception as exc:  # fail closed: a crash is an ERROR receipt, never a pass
         receipt.update(verdict=ERROR,
-                       reason=f"internal error: {type(exc).__name__}: {exc}")
+                       reason=_redact_home(f"internal error: {type(exc).__name__}: {exc}"))
     if want_json:
         print(json.dumps(receipt, indent=2))
     else:

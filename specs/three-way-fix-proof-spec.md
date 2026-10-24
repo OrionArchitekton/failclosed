@@ -97,7 +97,8 @@ form the fix, and the same three legs run with the same rules.
 ### S10. The caller's repository is left untouched
 Running the check creates no branches, worktrees, or working-tree changes in
 the caller's repository; all checkouts live in a throwaway location that is
-removed afterwards.
+removed afterwards. The test process sees its leg checkout as its working
+directory, `PWD` included; the caller's directory is not passed on.
 
 ### S11. The result is a machine-readable receipt
 With `--json`, the output is a single JSON object carrying the verdict and the
@@ -111,10 +112,10 @@ With `--fail-exit-code N`, a failing leg only counts if it exits with exactly
 usage errors).
 
 ### S13. The outcome belongs to the marked test
-A command that runs several tests cannot borrow another test's result. A
-failing leg whose output carries the pass-marker is `NOT_PROVEN` (the marked
-test passed; the failure came from something else), and a passing leg without
-the pass-marker is `NOT_PROVEN`.
+A failing leg whose output carries the pass-marker is `NOT_PROVEN` (the
+marked test passed; the failure came from something else), and a passing leg
+without the pass-marker is `NOT_PROVEN`. So when the command runs several
+tests, a marked test that passed cannot borrow another test's failure.
 
 ## Constraints
 
@@ -130,8 +131,9 @@ the pass-marker is `NOT_PROVEN`.
 - Git hooks never run during the check, and inherited git location variables
   (for example from a calling git hook) do not redirect it.
 - The receipt contains no absolute local paths of the caller's machine beyond
-  what the caller put in the test command: in captured test output, the
-  throwaway checkout location reads `<scratch>` and the home directory `~`.
+  what the caller put in the test command: in captured test output the
+  throwaway checkout location reads `<scratch>`, and in output and error
+  reasons the home directory reads `~`.
 
 ## Known limits
 
@@ -145,6 +147,9 @@ These are outside what a black-box run can decide; a reviewer covers them.
 - A test-support file outside the default conventions (a helper module, a
   fixture in an unusual place) is treated as fix code unless `--test-path`
   names it. The fix paths are listed in the receipt for this reason.
+- If the marked test stops early on base without failing (a skip, say) while
+  another test in the same command fails, the failing leg still counts.
+  Select only the marked test in the command.
 - A flaky test can satisfy all three legs by chance.
 - The markers are printed by the test, so a test written to game them (printing
   the pass-marker on some condition other than its own assertions) defeats the
