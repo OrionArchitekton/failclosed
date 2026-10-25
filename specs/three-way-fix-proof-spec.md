@@ -70,7 +70,8 @@ the verdict is `NOT_PROVEN`. A marker that only appears inside a longer line
 (for example a test runner echoing the test's source in a traceback), or a
 marker for a different test id that merely starts with the expected one, does
 not count. Only a newline ends a line: other line-break characters inside an
-echoed line do not make a marker whole.
+echoed line do not make a marker whole, and a final fragment with no newline
+after it is not a line.
 
 ### S6. A hung or killed test is rejected
 A leg that exceeds the timeout, or whose process is killed by a signal, fails;
@@ -121,9 +122,9 @@ tests, a marked test that passed cannot borrow another test's failure.
 
 - No new runtime dependencies: Python standard library plus the `git` CLI.
 - The test command is an argument vector after `--`, run without a shell.
-- Test paths are chosen by `--test-path` globs when given; otherwise by a
-  documented default set of test-file, test-directory, and test-data
-  conventions. Classification is one-sided. Treating a fix file as a test can
+- Test paths are chosen by a documented default set of test-file,
+  test-directory, and test-data conventions, plus any `--test-path` globs,
+  which add to the defaults and never remove one. Classification is one-sided. Treating a fix file as a test can
   only make a proof fail or error. Treating a test-support file as fix code is
   the dangerous direction, since changing the expectation would then count as
   the fix, so the defaults lean toward "test" and the receipt lists the fix

@@ -12,8 +12,8 @@ behavior changes).
   regression test fails before the fix, passes after it, and fails again with
   the fix reverted. In every run the test prints the ran-marker
   `THREEWAY-RAN:<test-id>` as a whole line, and it prints the pass-marker
-  `THREEWAY-PASS:<test-id>` only where it passed, so no other test's result
-  can stand in for it. Each leg runs in a fresh checkout of a throwaway clone,
+  `THREEWAY-PASS:<test-id>` only where it passed, so a marked test that
+  passed cannot borrow another test's failure. Each leg runs in a fresh checkout of a throwaway clone,
   so the caller's repository is never touched. Test data (fixtures, golden
   files, snapshots) counts as test paths, so rewriting an expectation is never
   taken for a fix. Ambiguity fails closed: a missing marker, a timeout, a

@@ -12,9 +12,10 @@ every one of those runs, proving it actually executed. Anything short of all
 four is not a proof.
 
 The test also prints its pass-marker (``THREEWAY-PASS:<test-id>``) as its last
-step, so it appears only when the test itself passed. That ties each leg's
-outcome to the marked test rather than to whatever else the command ran: the
-pass-marker must be absent from both failing legs and present in the passing one.
+step, so it appears only when the test itself passed. It must be absent from
+both failing legs and present in the passing one, so a marked test that passed
+cannot borrow another test's failure. (A marked test that stops early without
+failing still can: select only the marked test in the command.)
 
 Usage:
     python three_way_proof.py --fix <rev> --test-id <id> [--json] -- <test command...>
@@ -218,10 +219,15 @@ def is_test_path(path: str) -> bool:
 
 
 def test_path_classifier(globs: list | None):
-    """``--test-path`` globs (matched against the full path) replace the defaults."""
+    """``--test-path`` globs (matched against the full path) add to the defaults.
+
+    They never remove a default: dropping one would turn a fixture or golden
+    file back into "fix code", the direction that lets a proof pass too easily.
+    """
     if not globs:
         return is_test_path
-    return lambda path: any(fnmatch.fnmatchcase(path, glob) for glob in globs)
+    return lambda path: (is_test_path(path)
+                         or any(fnmatch.fnmatchcase(path, glob) for glob in globs))
 
 
 # --- legs ---
@@ -233,9 +239,11 @@ def marker_present(output: str, marker: str) -> bool:
     A marker embedded in a longer line does not count: test runners echo test
     source in tracebacks, so ``print('THREEWAY-RAN:x')`` shows up on screen
     even when that line never executed. Only "\\n" ends a line, so other
-    Unicode line breaks inside an echoed source line cannot carve one out.
+    Unicode line breaks inside an echoed source line cannot carve one out, and
+    a trailing fragment with no newline after it is not a line yet.
     """
-    return any(line.strip(" \t\r") == marker for line in output.split("\n"))
+    lines = output.split("\n")[:-1]
+    return any(line.strip(" \t\r") == marker for line in lines)
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
@@ -331,10 +339,11 @@ def _run_leg(leg: str, expect: str, tree: str, cmd: list, cwd: str, marker: str,
 
 
 def _redact_home(text: str) -> str:
-    home = os.path.expanduser("~")
-    if home and home != "/" and os.path.isabs(home):
+    home = os.path.expanduser("~").rstrip("/")
+    if home and os.path.isabs(home):
         for path in sorted({home, os.path.realpath(home)}, key=len, reverse=True):
-            text = text.replace(path + "/", "~/")
+            # Not followed by a name character, so a longer sibling name is left alone.
+            text = re.sub(re.escape(path) + r"(?![A-Za-z0-9._-])", "~", text)
     return text
 
 
@@ -551,7 +560,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         help=f"Per-leg timeout in seconds (default {DEFAULT_TIMEOUT_S:g})")
     parser.add_argument("--test-path", action="append", metavar="GLOB",
                         help="Glob for changed files that are tests, kept in every leg "
-                             "(repeatable; replaces the default conventions)")
+                             "(repeatable; adds to the default conventions)")
     parser.add_argument("--fail-exit-code", type=int,
                         help="Only this exit code counts as the test failing "
                              "(e.g. 1 for pytest, excluding usage and collection errors)")

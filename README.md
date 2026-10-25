@@ -141,8 +141,8 @@ python three_way_proof.py --fix HEAD --test-id add-positive --fail-exit-code 1 \
 - Changed files split into test paths, kept at the fix version in every leg, and
   fix paths, which are what gets reverted. The defaults cover common test files
   and directories plus test data (`testdata/`, `fixtures/`, `__snapshots__/`,
-  `*.golden`, `*.snap`, and similar); `--test-path GLOB` (repeatable) replaces
-  them. Calling a fix file a test can only make a proof fail. Calling a test
+  `*.golden`, `*.snap`, and similar); `--test-path GLOB` (repeatable) adds to
+  them and never removes one. Calling a fix file a test can only make a proof fail. Calling a test
   file fix code is the dangerous direction (rewriting an expected output would
   then count as the fix), so check the `fix code` line of the summary: every
   path there should be production code.

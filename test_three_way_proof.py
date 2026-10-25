@@ -294,6 +294,9 @@ def test_marker_on_its_own_line_counts(output):
     "    x = 1  #  THREEWAY-RAN:add-fix \n",
     "    # \x0bTHREEWAY-RAN:add-fix\x0c\n",
     " THREEWAY-RAN:add-fix\n",
+    # A line only counts once a newline ends it.
+    "THREEWAY-RAN:add-fix",
+    "collected 1 item\nTHREEWAY-RAN:add-fix",
 ])
 def test_marker_inside_a_longer_line_does_not_count(output):
     assert not twp.marker_present(output, "THREEWAY-RAN:add-fix")
@@ -623,6 +626,7 @@ PATH_PRINTING_TEST_SCRIPT = (
     "print('THREEWAY-RAN:add-fix')\n"
     "print('cwd=' + os.getcwd())\n"
     "print('home=' + os.path.join(os.path.expanduser('~'), 'private'))\n"
+    "print('home-exact=' + os.path.expanduser('~'))\n"
 ) + exit_on("add(2, 3) == 5")
 
 
@@ -639,6 +643,7 @@ def test_receipt_output_hides_local_paths(repo, capsys, tmp_path, monkeypatch):
     tails = "\n".join(leg["output_tail"] for leg in receipt["legs"])
     assert "cwd=<scratch>/before" in tails
     assert "home=~/private" in tails
+    assert "home-exact=~\n" in tails
     assert str(home) not in tails
     assert "three-way-proof-" not in tails
 
@@ -682,6 +687,15 @@ def test_scratch_directory_failure_is_an_error_without_local_paths(
 
     assert_error(code, receipt, "cannot create a scratch directory")
     assert str(repo) not in receipt["reason"]
+
+
+def test_home_directory_is_redacted_whole_and_as_a_prefix_only(tmp_path, monkeypatch):
+    home = str(tmp_path / "home-dir")
+    monkeypatch.setenv("HOME", home)
+
+    assert twp._redact_home(f"in {home} now") == "in ~ now"
+    assert twp._redact_home(f"{home}/x/y") == "~/x/y"
+    assert twp._redact_home(f"{home}2/x") == f"{home}2/x"
 
 
 def test_error_reasons_hide_the_home_directory(repo, capsys, tmp_path, monkeypatch):
@@ -826,6 +840,26 @@ def test_changing_only_the_expected_output_is_not_a_fix(repo, capsys):
     assert receipt["test_paths"] == ["test_calc.py", "testdata/add_2_3.golden"]
 
 
+CUSTOM_LOCATION_GOLDEN_TEST = GOLDEN_TEST_SCRIPT.replace("from calc import add", (
+    "import os\n"
+    "sys.path.insert(0, os.getcwd())\n"
+    "from calc import add"))
+
+
+def test_test_path_globs_do_not_drop_the_test_data_defaults(repo, capsys):
+    commit_files(repo, {"testdata/add_2_3.golden": "5\n"}, "golden output")
+    # A test in a custom place, plus a rewritten golden file and no code change.
+    fix = commit_files(repo, {"testdata/add_2_3.golden": "-1\n",
+                              "checks/verify_add.py": CUSTOM_LOCATION_GOLDEN_TEST}, "fix: add")
+
+    code, receipt = run_proof(capsys, repo, "--fix", fix, "--test-id", "add-fix",
+                              "--test-path", "checks/*",
+                              cmd=[sys.executable, "checks/verify_add.py"])
+
+    assert_error(code, receipt, "nothing to revert")
+    assert receipt["test_paths"] == ["checks/verify_add.py", "testdata/add_2_3.golden"]
+
+
 CUSTOM_LOCATION_TEST = TEST_SCRIPT.replace("from calc import add", (
     "import os\n"
     "sys.path.insert(0, os.getcwd())\n"
@@ -845,7 +879,7 @@ def test_unrecognised_test_file_fails_safe_without_test_path(repo, capsys):
     assert "marker" in receipt["reason"]
 
 
-def test_test_path_globs_override_the_defaults(repo, capsys):
+def test_test_path_globs_add_to_the_defaults(repo, capsys):
     fix = commit_files(
         repo, {"calc.py": FIXED, "checks/verify_add.py": CUSTOM_LOCATION_TEST}, "fix: add")
 
