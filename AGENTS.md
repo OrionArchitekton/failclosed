@@ -16,6 +16,7 @@ Flat single-directory layout, no package structure yet:
 - `run_review_pipeline.py` — orchestrator: bot wait, reviewer phases, fail-closed gate, status report
 - `parse_codex_output.py` — multi-shape hardened parser (structured JSON, JSON embedded in prose, native text)
 - `resolve_bot_threads.py`, `fetch_comments.py`, `graphql_helpers.py` — bot review-thread handling via the GitHub GraphQL API
+- `three_way_proof.py`: three-way fix proof: fail before, pass after, fail on revert, ran-marker every run
 - `bot_authors.yaml` — review-bot author classification
 - `failclosed.toml.example` — every optional configuration key, documented
 - `test_*.py` — pytest suites alongside the modules they cover
@@ -28,6 +29,7 @@ Owns:
   (`MERGE_READY`, `FINDINGS_REMAIN`, `THREADS_UNRESOLVED`, `BOTS_PENDING`)
 - the reviewer command seam (`reviewer_command`: prompt on stdin, output on stdout)
 - fetching, classifying, and resolving bot review threads
+- the three-way fix proof and its verdicts (`PROVEN`, `NOT_PROVEN`, `ERROR`)
 
 Does not own:
 
