@@ -168,14 +168,16 @@ python three_way_proof.py --fix HEAD --test-id add-positive --fail-exit-code 1 \
 | `ERROR` | 2 | The proof could not be evaluated: invalid input (including `--help`), nothing to revert, a patch that does not apply, a tree that cannot be built exactly, or an internal error. |
 
 For a commit or range, the `reverted` leg checks out the same code as `before`.
-It runs after the passing leg, so it shows the pass came from the fix and not
-from run order or from state left outside the checkout.
+It runs after the passing leg, so a pass that persists through state left
+outside the checkout (a warm cache, a sentinel file) is caught.
 
 Limits a reviewer still covers: a test that fails for a reason other than the
 bug (calling a function only the fix adds, say) still fails its leg; a test
 helper outside the default conventions counts as fix code unless `--test-path`
-names it; a flaky test can pass all three legs by chance; and a test written to
-game its own markers defeats the proof, so the test itself still gets read. For
+names it; a flaky test, or one whose outcome depends on how many times it has run, can
+pass all three legs; and a test written to game its own markers defeats the
+proof, so the test itself still gets read. The receipt and summary carry the
+test's own output, so treat them like a test log. For
 a parametrized test, select the case that reproduces the bug or print a per-case
 id (`THREEWAY-RAN:add[negative]`).
 

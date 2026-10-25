@@ -698,6 +698,23 @@ def test_home_directory_is_redacted_whole_and_as_a_prefix_only(tmp_path, monkeyp
     assert twp._redact_home(f"{home}2/x") == f"{home}2/x"
 
 
+@pytest.mark.parametrize("exc_type", [twp.ProofError, OSError])
+def test_errors_inside_the_proof_hide_the_scratch_location(repo, capsys, monkeypatch, exc_type):
+    fix = commit_files(repo, {"calc.py": FIXED, "test_calc.py": TEST_SCRIPT}, "fix: add")
+
+    def failing_checkout(_clone, _tree, dest):
+        raise exc_type(f"git worktree failed: could not create '{dest}'")
+
+    monkeypatch.setattr(twp, "_checkout_tree", failing_checkout)
+
+    code, receipt = run_proof(capsys, repo, "--fix", fix, "--test-id", "add-fix")
+
+    assert code == 2
+    assert receipt["verdict"] == "ERROR"
+    assert "'<scratch>/before'" in receipt["reason"]
+    assert "three-way-proof-" not in receipt["reason"]
+
+
 def test_error_reasons_hide_the_home_directory(repo, capsys, tmp_path, monkeypatch):
     home = tmp_path / "home-dir"
     home.mkdir()

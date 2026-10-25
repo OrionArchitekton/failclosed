@@ -62,7 +62,8 @@ If the `after` leg fails, or exits 0 without the pass-marker, the verdict is
 ### S4. A pass that came from run order or leftover state is rejected
 If the `reverted` leg passes, the verdict is `NOT_PROVEN`, naming `reverted`.
 Each leg runs in its own fresh checkout, so in-tree leftovers cannot leak
-between legs; state outside the checkout is what this leg catches.
+between legs; state outside the checkout that keeps a test passing (a warm
+cache, a sentinel file) is what this leg catches.
 
 ### S5. A test that did not provably run is rejected
 If any leg's output lacks the ran-marker as a whole line, that leg fails and
@@ -152,6 +153,11 @@ These are outside what a black-box run can decide; a reviewer covers them.
   another test in the same command fails, the failing leg still counts.
   Select only the marked test in the command.
 - A flaky test can satisfy all three legs by chance.
+- Legs run in a fixed order and share everything outside their checkouts (the
+  home directory, caches, services), so a test whose outcome depends on how
+  many times it has run can satisfy all three legs.
+- The receipt and summary carry the test's own output, so anything the test
+  prints (a credential included) appears there as it would in a test log.
 - The markers are printed by the test, so a test written to game them (printing
   the pass-marker on some condition other than its own assertions) defeats the
   proof. The check catches weak, mis-selected, and order-dependent tests, not a

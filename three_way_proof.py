@@ -477,6 +477,11 @@ def prove(receipt: dict, repo: str, fix_rev: str | None, fix_diff: str | None,
                 receipt["failed_leg"] = leg
                 receipt["reason"] = f"{leg}: {result['reason']}"
         receipt["verdict"] = NOT_PROVEN if receipt["failed_leg"] else PROVEN
+    except ProofError as exc:  # git errors can name a scratch checkout
+        raise ProofError(_redact_paths(str(exc), scratch)) from None
+    except Exception as exc:  # still an ERROR receipt, minus the scratch location
+        raise ProofError(_redact_paths(f"internal error: {type(exc).__name__}: {exc}",
+                                       scratch)) from None
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
