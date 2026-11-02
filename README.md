@@ -1,5 +1,7 @@
 # failclosed
 
+Part of [Cosmocrat OS](https://www.cosmocrat.ai/), a family of independent tools for human-directed AI work. [Choose a starting workflow](https://www.cosmocrat.ai/docs). This project keeps its own installation identifiers, releases, license and support boundaries.
+
 ![License: MIT](https://img.shields.io/github/license/OrionArchitekton/failclosed?style=flat&color=1a1a1a)
 ![CI](https://github.com/OrionArchitekton/failclosed/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-1a1a1a?style=flat&logo=python&logoColor=3776AB)
