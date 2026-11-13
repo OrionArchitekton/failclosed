@@ -43,7 +43,8 @@ def _reviewer_replaying(tmp_path, output: str, exit_code: int = 0) -> list:
     return [sys.executable, "-c", script, str(path), str(exit_code)]
 
 
-def _run(tmp_path, monkeypatch, reviewer_command, threads_error=None) -> dict:
+def _run(tmp_path, monkeypatch, reviewer_command, threads_error=None,
+         dry_run=False, **overrides) -> dict:
     """Run the whole pipeline offline and return its report."""
     config = dict(rrp.DEFAULTS)
     config.update(
@@ -51,6 +52,7 @@ def _run(tmp_path, monkeypatch, reviewer_command, threads_error=None) -> dict:
         bot_wait_seconds=0,
         worktree_dir=str(tmp_path),
     )
+    config.update(overrides)
     monkeypatch.setattr(rrp, "load_config", lambda config_path=None: config)
     monkeypatch.setattr(rrp, "resolve_pr_number", lambda repo_root, branch: 7)
     monkeypatch.setattr(rrp, "_ensure_on_branch", lambda repo_root, branch, worktree_dir: None)
@@ -68,7 +70,7 @@ def _run(tmp_path, monkeypatch, reviewer_command, threads_error=None) -> dict:
         "branch": "feature-x",
         "sha": "abc1234",
     }))
-    return rrp.run_pipeline(str(ctx), skip_delay=True)
+    return rrp.run_pipeline(str(ctx), skip_delay=True, dry_run=dry_run)
 
 
 # --- Controls: the harness can produce each outcome ---
@@ -130,3 +132,41 @@ def test_determine_status_needs_each_thread_phase_ok_with_a_count():
     assert rrp.determine_status(ok1, False, {"status": "ok", "remaining_threads": 2}) == (
         "THREADS_UNRESOLVED"
     )
+
+
+# --- Defect 3: a reviewer that cannot run, or exits non-zero ---
+
+def test_reviewer_that_cannot_run_blocks_merge_ready(tmp_path, monkeypatch):
+    print("THREEWAY-RAN:reviewer-cannot-run")
+    missing = [str(tmp_path / "no-such-reviewer"), "--json", "-"]
+    report = _run(tmp_path, monkeypatch, missing)
+    assert report["phases"]["2_standard"]["status"] == "error"
+    assert report["phases"]["3_adversarial"]["status"] == "error"
+    assert report["status"] == "FINDINGS_REMAIN", report["status"]
+
+    # A clean verdict on stdout does not count when the reviewer exits 3.
+    report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, CLEAN_PASS, exit_code=3))
+    assert report["phases"]["2_standard"]["status"] == "error"
+    assert report["phases"]["2_standard"]["returncode"] == 3
+    assert report["status"] == "FINDINGS_REMAIN", report["status"]
+    print("THREEWAY-PASS:reviewer-cannot-run")
+
+
+def test_required_review_phase_skipped_or_not_run_blocks_merge_ready(tmp_path, monkeypatch):
+    # An empty reviewer_command skips both review phases: no review ran.
+    report = _run(tmp_path, monkeypatch, "")
+    assert report["phases"]["2_standard"]["status"] == "skipped"
+    assert report["status"] == "FINDINGS_REMAIN"
+    # A dry run never runs the reviewer, so it has no evidence to admit.
+    report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, CLEAN_PASS), dry_run=True)
+    assert report["phases"]["2_standard"]["status"] == "dry_run"
+    assert report["status"] == "FINDINGS_REMAIN"
+
+
+def test_adversarial_phase_disabled_by_config_is_not_required(tmp_path, monkeypatch):
+    report = _run(
+        tmp_path, monkeypatch, _reviewer_replaying(tmp_path, CLEAN_PASS),
+        adversarial_review=False,
+    )
+    assert report["phases"]["3_adversarial"]["status"] == "skipped"
+    assert report["status"] == "MERGE_READY"

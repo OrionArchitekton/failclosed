@@ -394,6 +394,18 @@ def phase2_review(
         output.encode("utf-8", errors="replace")
     ).hexdigest()[:16]
 
+    # A reviewer that exits non-zero did not complete its review; whatever it
+    # printed is not a verdict to trust, even a clean-looking one.
+    if result.returncode != 0:
+        return {
+            "status": "error",
+            "error": f"reviewer exited with code {result.returncode}",
+            "returncode": result.returncode,
+            "raw_output": output[:2000],
+            "stderr": result.stderr[:1000] if result.stderr else "",
+            "raw_output_hash": raw_output_hash,
+        }
+
     # The reviewer output may be structured JSON or rendered text. Try the
     # structured parser first; if it produces nothing parseable, fall back to
     # the native (rendered-text) parser. Either way the fail-closed gate below
@@ -484,8 +496,9 @@ def determine_status(
 ) -> str:
     """Determine final pipeline status.
 
-    review_phase_failed: True when any review phase has status in
-    {"parse_error", "timeout"}. The phase-level fail-closed gate would
+    review_phase_failed: True when any required review phase has a status
+    other than "ok" (parse_error, timeout, error, skipped, dry_run). The
+    phase-level fail-closed gate would
     otherwise be inert — a parse-failed phase produces zero fix_requests,
     so findings_remain stays False, and the pipeline would falsely
     report MERGE_READY.
@@ -676,10 +689,12 @@ def run_pipeline(
     report["phases"]["5_final_sweep"] = p5
 
     # --- Determine status ---
-    review_phase_failed = any(
-        p.get("status") in ("parse_error", "timeout")
-        for p in (p2, p3)
-    )
+    # Positive evidence only: every required review phase must report "ok".
+    # Any other status (parse_error, timeout, error, skipped, dry_run) means
+    # no trustworthy review ran. The adversarial phase is required unless the
+    # config disables it.
+    required_reviews = [p2] + ([p3] if config["adversarial_review"] else [])
+    review_phase_failed = any(p.get("status") != "ok" for p in required_reviews)
     status = determine_status(p1, findings_remain, p5, review_phase_failed)
     report["status"] = status
     report["fix_requests"] = fix_requests
