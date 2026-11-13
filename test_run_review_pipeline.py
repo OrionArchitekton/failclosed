@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Tests for the fail-closed gate in run_review_pipeline.
+
+Each test drives run_pipeline end to end. GitHub access and git worktree
+handling are stubbed out; the reviewer is a real subprocess that replays a
+fixed output through the stdin/stdout seam. MERGE_READY must need positive
+evidence that every required phase ran, succeeded, and reported its fields.
+
+The regression tests print THREEWAY-RAN/THREEWAY-PASS markers for
+three_way_proof.py.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+
+import run_review_pipeline as rrp
+
+CLEAN_PASS = '{"verdict": "pass", "findings": []}'
+
+OWN_HIGH_FINDING = json.dumps({
+    "verdict": "fix",
+    "findings": [{
+        "severity": "high",
+        "file": "a.py",
+        "line_start": 1,
+        "title": "Real defect",
+        "body": "a.py has a real defect.",
+    }],
+})
+
+
+def _reviewer_replaying(tmp_path, output: str, exit_code: int = 0) -> list:
+    """A reviewer command that reads the prompt, prints `output`, exits `exit_code`."""
+    path = tmp_path / "reviewer_output.txt"
+    path.write_text(output)
+    script = (
+        "import sys; sys.stdin.read(); "
+        "sys.stdout.write(open(sys.argv[1]).read()); "
+        "sys.exit(int(sys.argv[2]))"
+    )
+    return [sys.executable, "-c", script, str(path), str(exit_code)]
+
+
+def _run(tmp_path, monkeypatch, reviewer_command, threads_error=None) -> dict:
+    """Run the whole pipeline offline and return its report."""
+    config = dict(rrp.DEFAULTS)
+    config.update(
+        reviewer_command=reviewer_command,
+        bot_wait_seconds=0,
+        worktree_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(rrp, "load_config", lambda config_path=None: config)
+    monkeypatch.setattr(rrp, "resolve_pr_number", lambda repo_root, branch: 7)
+    monkeypatch.setattr(rrp, "_ensure_on_branch", lambda repo_root, branch, worktree_dir: None)
+
+    def fake_threads(repo_path, pr_number):
+        if threads_error:
+            raise RuntimeError(threads_error)
+        return {"pr": {"number": pr_number}, "threads": [], "summary": {}}
+
+    monkeypatch.setattr(rrp, "resolve_bot_threads_run", fake_threads)
+
+    ctx = tmp_path / "ctx.json"
+    ctx.write_text(json.dumps({
+        "repo_root": str(tmp_path),
+        "branch": "feature-x",
+        "sha": "abc1234",
+    }))
+    return rrp.run_pipeline(str(ctx), skip_delay=True)
+
+
+# --- Controls: the harness can produce each outcome ---
+
+def test_control_clean_pass_with_healthy_phases_is_merge_ready(tmp_path, monkeypatch):
+    report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, CLEAN_PASS))
+    assert report["phases"]["2_standard"]["status"] == "ok"
+    assert report["phases"]["3_adversarial"]["status"] == "ok"
+    assert report["status"] == "MERGE_READY"
+
+
+def test_control_own_finding_with_file_is_findings_remain(tmp_path, monkeypatch):
+    report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, OWN_HIGH_FINDING))
+    assert report["status"] == "FINDINGS_REMAIN"
+    assert len(report["fix_requests"]) == 2
+
+
+# --- Defect 1: fix verdict with an empty findings list (strict-JSON path) ---
+
+def test_fix_verdict_with_empty_findings_blocks_merge_ready(tmp_path, monkeypatch):
+    print("THREEWAY-RAN:fix-empty-findings")
+    for verdict in ("fix", "needs-attention"):
+        output = json.dumps({"verdict": verdict, "findings": []})
+        report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+        assert report["status"] == "FINDINGS_REMAIN", (verdict, report["status"])
+        assert report["phases"]["2_standard"]["status"] == "parse_error", verdict
+    print("THREEWAY-PASS:fix-empty-findings")

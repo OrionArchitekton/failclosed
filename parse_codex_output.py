@@ -137,6 +137,18 @@ def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
             "recommendation": f.get("recommendation", ""),
         })
 
+    # Verdict-vs-findings consistency, the same rule the native text path
+    # applies: a verdict that implies actionable findings must carry at least
+    # one finding that cites a file. An empty findings list is the
+    # contradiction too, not a clean review.
+    verdict = data.get("verdict")
+    normalized = verdict.strip().strip("\"'.,;:").lower() if isinstance(verdict, str) else None
+    if normalized in ("fix", "needs-attention") and not any(f.get("file") for f in findings):
+        parse_warnings.append(
+            f"verdict={verdict!r} implies findings but none cites a file"
+        )
+        missing.append("findings_with_file")
+
     schema_valid = not missing
     return {
         "verdict": data.get("verdict"),
