@@ -360,3 +360,32 @@ def test_findings_not_a_list_of_objects_blocks_merge_ready(tmp_path, monkeypatch
         assert report["status"] == "FINDINGS_REMAIN", (findings, report["status"])
         assert report["phases"]["2_standard"]["status"] == "parse_error", findings
     print("THREEWAY-PASS:findings-shape")
+
+
+# --- Defect 11: an approving verdict over a finding with no file cleared ---
+
+def test_approving_verdict_with_unfixable_finding_blocks(tmp_path, monkeypatch):
+    print("THREEWAY-RAN:unfixable-finding")
+    no_file = {"severity": "high", "file": None, "title": "Token check skipped",
+               "body": "The token check can be skipped."}
+    outputs = {
+        "JSON pass, high finding with null file": json.dumps(
+            {"verdict": "pass", "findings": [no_file]}
+        ),
+        "text Verdict: pass, high finding with no path": (
+            "Verdict: pass\n- [high] Token check skipped\n"
+        ),
+    }
+    for name, output in outputs.items():
+        report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+        assert report["status"] == "FINDINGS_REMAIN", (name, report["status"])
+        assert report["unfixable"], name
+    print("THREEWAY-PASS:unfixable-finding")
+
+
+def test_approving_verdict_with_low_unfixable_finding_still_merge_ready(tmp_path, monkeypatch):
+    low = {"severity": "low", "file": None, "title": "Naming", "body": "Naming nit."}
+    output = json.dumps({"verdict": "pass", "findings": [low]})
+    report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+    assert report["status"] == "MERGE_READY", report["status"]
+

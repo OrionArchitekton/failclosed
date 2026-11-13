@@ -704,8 +704,15 @@ def run_pipeline(
         normalize_verdict(p.get("verdict")) in APPROVING_VERDICTS
         for p in required_reviews
     )
+    # A finding at or above fix_threshold that cites no file yields no fix
+    # request, but it is still a finding: an approving verdict over it is not
+    # a clean review. It blocks, and the report lists it under "unfixable".
+    unfixable_remain = any(p.get("unfixable_findings") for p in required_reviews)
     status = determine_status(
-        p1, findings_remain or not review_approved, p5, review_phase_failed
+        p1,
+        findings_remain or unfixable_remain or not review_approved,
+        p5,
+        review_phase_failed,
     )
     report["status"] = status
     report["fix_requests"] = fix_requests

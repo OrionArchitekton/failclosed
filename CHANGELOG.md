@@ -8,7 +8,7 @@ behavior changes).
 
 ### Fixed
 
-Ten **fail-open** paths, each of which ended `MERGE_READY`. They share one
+Eleven **fail-open** paths, each of which ended `MERGE_READY`. They share one
 root: the gate enumerated bad states and read missing evidence as clean. It now
 admits `MERGE_READY` only on positive evidence that every required phase ran,
 reported success, and carried the fields it must; anything else is
@@ -77,6 +77,12 @@ reported success, and carried the fields it must; anything else is
   without a schema error. So `{"verdict": "pass", "findings": null}` reached
   `MERGE_READY`. `findings` must now be a list of objects; anything else is
   `parse_error`.
+- **Fail-open: an approval over a finding with no file.** A finding at or
+  above `fix_threshold` that cites no file produces no fix request, and the
+  gate counted only fix requests, so `pass` with a high finding whose `file`
+  is null (or `Verdict: pass` with a pathless `- [high]` marker) reached
+  `MERGE_READY`. Behavior change: it now blocks (`FINDINGS_REMAIN`), and the
+  finding is listed under `unfixable`.
 
 ### Added
 

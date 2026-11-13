@@ -41,7 +41,9 @@ reviewer output passes through a hardened parser, and a gate **refuses to report
 It also refuses `MERGE_READY` unless every review ends in a known approving
 verdict, `pass` or `approve`. An unknown verdict such as `reject` blocks, and
 so does a `fix` or `needs-attention` verdict even when all its findings sit
-below `fix_threshold`. And it refuses when any required phase failed or did
+below `fix_threshold`. An approving verdict that carries a finding at or above
+`fix_threshold` with no file blocks too: there is nothing to auto-fix, so the
+report lists it under `unfixable` for a person to read. And it refuses when any required phase failed or did
 not report: a reviewer that cannot start, exits non-zero, times out, or is
 skipped (an empty `reviewer_command`, or a `--dry-run`, which never runs the
 reviewer), a bot-thread phase that errors, and a final sweep that reports no
