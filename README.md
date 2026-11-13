@@ -34,9 +34,10 @@ reviewer output passes through a hardened parser, and a gate **refuses to report
 - self-contradictory (a `fix` or `needs-attention` verdict with no finding
   citing a file, including one with an empty findings list), or
 - ambiguous (more than one verdict object, a verdict object behind other
-  JSON, a verdict object next to a text verdict line or finding markers, or
-  more than one `Verdict:` line in the output, such as a verdict quoted from
-  a file under review ahead of the reviewer's own).
+  JSON, a verdict object next to a text verdict line or any bracketed finding
+  marker, an unknown severity included, or more than one `Verdict:` line in
+  the output, such as a verdict quoted from a file under review ahead of the
+  reviewer's own).
 
 It also refuses `MERGE_READY` unless every review ends in a known approving
 verdict, `pass` or `approve`. An unknown verdict such as `reject` blocks, and

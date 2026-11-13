@@ -151,12 +151,12 @@ def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
     return result
 
 
-# A text-format finding marker anywhere on a line start, bulleted or not
-# ('- [high] ...', '[P1] ...'). Broader than _FINDING_MARKER_RE on purpose:
-# it only decides refusal, never what a finding says.
-_TEXT_FINDING_EVIDENCE_RE = re.compile(
-    r"(?im)^[^\w\n]*\[(?:critical|high|medium|low|P[0-3])\]"
-)
+# A text-format finding marker on a line start, bulleted or not, with any
+# bracketed word ('- [high] ...', '[P1] ...', '- [blocker] ...'). Broader
+# than _FINDING_MARKER_RE on purpose: it only decides refusal, never what a
+# finding says, so an unknown severity counts as evidence instead of being
+# ignored. A markdown checkbox ('- [x]') also matches; that only blocks.
+_TEXT_FINDING_EVIDENCE_RE = re.compile(r"(?m)^[^\w\n]*\[[A-Za-z][\w-]*\]")
 
 
 def _has_text_verdict_evidence(text: str) -> bool:

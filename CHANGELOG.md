@@ -8,7 +8,7 @@ behavior changes).
 
 ### Fixed
 
-Eleven **fail-open** paths, each of which ended `MERGE_READY`. They share one
+Twelve **fail-open** paths, each of which ended `MERGE_READY`. They share one
 root: the gate enumerated bad states and read missing evidence as clean. It now
 admits `MERGE_READY` only on positive evidence that every required phase ran,
 reported success, and carried the fields it must; anything else is
@@ -83,6 +83,11 @@ reported success, and carried the fields it must; anything else is
   is null (or `Verdict: pass` with a pathless `- [high]` marker) reached
   `MERGE_READY`. Behavior change: it now blocks (`FINDINGS_REMAIN`), and the
   finding is listed under `unfixable`.
+- **Fail-open: an unknown bracket marker escaped the mixed-format check.** The
+  check above recognized only known severities, so `- [blocker] src/auth.py:7
+  ...` beside a JSON `pass` was ignored and the approval reached
+  `MERGE_READY`. Any bracketed word at a line start now counts as text
+  evidence (a markdown checkbox does too, which only blocks).
 
 ### Added
 

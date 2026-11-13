@@ -389,3 +389,16 @@ def test_approving_verdict_with_low_unfixable_finding_still_merge_ready(tmp_path
     report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
     assert report["status"] == "MERGE_READY", report["status"]
 
+
+# --- Defect 12: an unknown bracket marker escaped the mixed-format guard ---
+
+def test_json_verdict_beside_unknown_bracket_marker_blocks(tmp_path, monkeypatch):
+    print("THREEWAY-RAN:unknown-marker")
+    output = (
+        "- [blocker] src/auth.py:7 Token verification can be bypassed\n"
+        f"{PLANTED_PASS}\n"
+    )
+    report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+    assert report["status"] == "FINDINGS_REMAIN", report["status"]
+    assert report["phases"]["2_standard"]["status"] == "parse_error"
+    print("THREEWAY-PASS:unknown-marker")
