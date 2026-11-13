@@ -489,12 +489,24 @@ def determine_status(
     otherwise be inert — a parse-failed phase produces zero fix_requests,
     so findings_remain stays False, and the pipeline would falsely
     report MERGE_READY.
+
+    The bot-thread phases need positive evidence too: phase 1 and phase 5
+    must each report status "ok", and phase 5 must carry an integer
+    remaining_threads count. An errored phase has no count, and reading the
+    missing count as zero would clear the gate with threads unchecked.
     """
-    remaining = phase5.get("remaining_threads", 0)
     if review_phase_failed:
         return "FINDINGS_REMAIN"
-    if remaining == 0 and not findings_remain:
-        return "MERGE_READY"
+    remaining = phase5.get("remaining_threads")
+    threads_checked = (
+        phase1.get("status") == "ok"
+        and phase5.get("status") == "ok"
+        and isinstance(remaining, int)
+        and not isinstance(remaining, bool)
+        and remaining >= 0
+    )
+    if not threads_checked:
+        return "FINDINGS_REMAIN"
     if findings_remain:
         return "FINDINGS_REMAIN"
     if remaining > 0:

@@ -96,3 +96,37 @@ def test_fix_verdict_with_empty_findings_blocks_merge_ready(tmp_path, monkeypatc
         assert report["status"] == "FINDINGS_REMAIN", (verdict, report["status"])
         assert report["phases"]["2_standard"]["status"] == "parse_error", verdict
     print("THREEWAY-PASS:fix-empty-findings")
+
+
+# --- Defect 2: an errored bot-thread phase read as zero open threads ---
+
+def test_thread_phase_error_blocks_merge_ready(tmp_path, monkeypatch):
+    print("THREEWAY-RAN:thread-phase-error")
+    report = _run(
+        tmp_path, monkeypatch, _reviewer_replaying(tmp_path, CLEAN_PASS),
+        threads_error="gh auth status failed",
+    )
+    assert report["phases"]["1_bot_threads"]["status"] == "error"
+    assert report["phases"]["5_final_sweep"]["status"] == "error"
+    assert report["status"] != "MERGE_READY"
+    assert report["status"] == "FINDINGS_REMAIN"
+    print("THREEWAY-PASS:thread-phase-error")
+
+
+def test_determine_status_needs_each_thread_phase_ok_with_a_count():
+    ok1 = {"status": "ok"}
+    ok5 = {"status": "ok", "remaining_threads": 0}
+    assert rrp.determine_status(ok1, False, ok5) == "MERGE_READY"
+    cases = {
+        "phase1 error": ({"status": "error", "error": "boom"}, ok5),
+        "phase5 error": (ok1, {"status": "error", "error": "boom"}),
+        "phase5 ok without a count": (ok1, {"status": "ok"}),
+        "phase5 count not an int": (ok1, {"status": "ok", "remaining_threads": "0"}),
+        "phase1 missing": ({}, ok5),
+    }
+    for name, (p1, p5) in cases.items():
+        assert rrp.determine_status(p1, False, p5) == "FINDINGS_REMAIN", name
+    # Real open threads still report THREADS_UNRESOLVED.
+    assert rrp.determine_status(ok1, False, {"status": "ok", "remaining_threads": 2}) == (
+        "THREADS_UNRESOLVED"
+    )
