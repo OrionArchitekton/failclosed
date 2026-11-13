@@ -8,7 +8,7 @@ behavior changes).
 
 ### Fixed
 
-Four **fail-open** paths, each of which ended `MERGE_READY`. They share one
+Seven **fail-open** paths, each of which ended `MERGE_READY`. They share one
 root: the gate enumerated bad states and read missing evidence as clean. It now
 admits `MERGE_READY` only on positive evidence that every required phase ran,
 reported success, and carried the fields it must; anything else is
@@ -39,6 +39,23 @@ reported success, and carried the fields it must; anything else is
   `verdict` key is now refused as `parse_error` instead of guessed at, without
   falling back to the native text parser. Strict single-object JSON, and prose
   with exactly one verdict object, parse as before.
+- **Fail-open: the first plain-text `Verdict:` line won.** The native text
+  parser took the first `Verdict:` line, so a `Verdict: pass` quoted ahead of
+  the reviewer's own verdict decided the review. More than one verdict line,
+  agreeing or not and decorated or not (`**Verdict**:`, `## Verdict:`,
+  `> Verdict:`), is now refused as `parse_error`.
+- **Fail-open: a null or missing verdict.** On the JSON paths only a missing
+  `verdict` key was flagged; a null, blank, or non-string verdict was schema
+  valid. It now counts as missing (`parse_error`). On the native text path,
+  finding markers with no `Verdict:` line still imply `fix` (current Codex
+  output has no verdict line), which is not an approval.
+- **Fail-open: any verdict value cleared the gate.** The gate never checked
+  the verdict, so an unknown verdict such as `reject`, with no findings or
+  only below-threshold ones, was `MERGE_READY`. Only a known approving
+  verdict, `pass` or `approve` (case-insensitive), can now reach
+  `MERGE_READY`. Behavior change: a `fix` or `needs-attention` verdict whose
+  findings all sit below `fix_threshold` now blocks (`FINDINGS_REMAIN` with no
+  fix requests) instead of clearing the gate.
 
 ### Added
 
