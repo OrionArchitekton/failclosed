@@ -246,3 +246,37 @@ def test_null_or_missing_verdict_blocks_merge_ready(tmp_path, monkeypatch):
         assert report["status"] == "FINDINGS_REMAIN", (name, report["status"])
         assert report["phases"]["2_standard"]["status"] == "parse_error", name
     print("THREEWAY-PASS:null-or-missing-verdict")
+
+
+# --- Defect 7: only a known approving verdict can reach MERGE_READY ---
+
+def test_unknown_or_non_approving_verdict_blocks_merge_ready(tmp_path, monkeypatch):
+    print("THREEWAY-RAN:unknown-verdict")
+    outputs = {
+        "reject, no findings": json.dumps({"verdict": "reject", "findings": []}),
+        "reject, low finding": json.dumps({"verdict": "reject", "findings": [LOW_FILE_FINDING]}),
+        "fix, only a below-threshold finding": json.dumps(
+            {"verdict": "fix", "findings": [LOW_FILE_FINDING]}
+        ),
+        "text: Verdict: reject": "Verdict: reject\n",
+        "text: inferred fix, low finding": "- [low] a.py:1 Minor style nit\n",
+    }
+    for name, output in outputs.items():
+        report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+        assert report["status"] == "FINDINGS_REMAIN", (name, report["status"])
+    print("THREEWAY-PASS:unknown-verdict")
+
+
+def test_known_approving_verdicts_still_reach_merge_ready(tmp_path, monkeypatch):
+    outputs = {
+        "pass": CLEAN_PASS,
+        "approve": json.dumps({"verdict": "approve", "findings": []}),
+        "titlecase Approve": json.dumps({"verdict": "Approve", "findings": []}),
+        "pass, only a below-threshold finding": json.dumps(
+            {"verdict": "pass", "findings": [LOW_FILE_FINDING]}
+        ),
+        "text: Verdict: approve": "Verdict: approve\n",
+    }
+    for name, output in outputs.items():
+        report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+        assert report["status"] == "MERGE_READY", (name, report["status"])

@@ -22,6 +22,12 @@ SEVERITY_TO_PRIORITY = {
 PRIORITY_TO_SEVERITY = {v: k for k, v in SEVERITY_TO_PRIORITY.items()}
 
 SEVERITY_LEVELS = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+# The only verdicts that can clear the gate (compared after normalize_verdict).
+# The review prompt asks for 'pass'; 'approve' is the clean verdict of the
+# structured and native text contracts. Any other verdict, known ('fix',
+# 'needs-attention') or not ('reject'), is not an approval.
+APPROVING_VERDICTS = frozenset({"pass", "approve"})
 PRIORITY_LEVELS = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4}
 
 

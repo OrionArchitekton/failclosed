@@ -52,8 +52,10 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from graphql_helpers import reply_and_resolve
 from parse_codex_output import (
+    APPROVING_VERDICTS,
     _unparseable_result,
     fixable_findings,
+    normalize_verdict,
     parse_codex_review,
     parse_native_review_stdout,
     unfixable_findings,
@@ -695,7 +697,16 @@ def run_pipeline(
     # config disables it.
     required_reviews = [p2] + ([p3] if config["adversarial_review"] else [])
     review_phase_failed = any(p.get("status") != "ok" for p in required_reviews)
-    status = determine_status(p1, findings_remain, p5, review_phase_failed)
+    # Only a known approving verdict can clear the gate. An unknown verdict
+    # ("reject"), or a fix verdict whose findings all sit below fix_threshold,
+    # yields no fix request, but it is not an approval either.
+    review_approved = all(
+        normalize_verdict(p.get("verdict")) in APPROVING_VERDICTS
+        for p in required_reviews
+    )
+    status = determine_status(
+        p1, findings_remain or not review_approved, p5, review_phase_failed
+    )
     report["status"] = status
     report["fix_requests"] = fix_requests
     report["unfixable"] = (
