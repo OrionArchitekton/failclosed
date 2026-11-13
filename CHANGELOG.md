@@ -8,7 +8,7 @@ behavior changes).
 
 ### Fixed
 
-Eight **fail-open** paths, each of which ended `MERGE_READY`. They share one
+Nine **fail-open** paths, each of which ended `MERGE_READY`. They share one
 root: the gate enumerated bad states and read missing evidence as clean. It now
 admits `MERGE_READY` only on positive evidence that every required phase ran,
 reported success, and carried the fields it must; anything else is
@@ -64,6 +64,13 @@ reported success, and carried the fields it must; anything else is
   verdict carrying a `P0` finding produced no fix request and reached
   `MERGE_READY`. A P-level now maps to its severity (`P0` is `critical`), and
   any other value, including a non-string, is schema-invalid (`parse_error`).
+- **Fail-open: one quoted JSON approval beat the reviewer's text verdict.**
+  With a single verdict object in prose, the parser took it without looking
+  at the rest of the output, so a `{"verdict": "pass"}` quoted from a file
+  under review silenced the reviewer's own `Verdict: fix` line or finding
+  markers (current Codex prints markers and no verdict line). A JSON verdict
+  object next to a text verdict line or finding markers is now refused as
+  `parse_error`.
 
 ### Added
 

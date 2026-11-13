@@ -89,12 +89,16 @@ def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
     at: text quoted from the code under review can carry an object shaped
     like a verdict, and picking one would let planted text decide the
     review. A single candidate must also be the first object: picking a
-    later one would let a planted approval win behind any other JSON.
+    later one would let a planted approval win behind any other JSON. And a
+    verdict object next to a text verdict line or finding markers outside
+    the objects is refused too: two verdicts in two formats.
     Otherwise the first object is validated, as before. Signals
     companion-emit drift via parse_warnings.
     """
     objects: List[dict] = []
+    outside: List[str] = []
     pos = 0
+    scanned = 0
     while True:
         start = output.find("{", pos)
         if start < 0:
@@ -108,7 +112,9 @@ def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
             pos = start + 1
             continue
         objects.append(data)
-        pos = end
+        outside.append(output[scanned:start])
+        pos = scanned = end
+    outside.append(output[scanned:])
 
     if not objects:
         return None
@@ -119,6 +125,15 @@ def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
             "single_verdict_object",
             f"{candidates} candidate verdict objects in surrounding text; "
             "refusing to pick one",
+        )
+    if candidates and _has_text_verdict_evidence("\n".join(outside)):
+        # A JSON verdict next to a text verdict line or finding markers is
+        # two verdicts in two formats. Taking the JSON one would let a quoted
+        # approval silence the reviewer's own text findings.
+        return _refused_extraction(
+            "single_verdict_format",
+            "a JSON verdict object and a text verdict or finding markers in "
+            "the same output; refusing to pick one",
         )
     if candidates == 1 and "verdict" not in objects[0]:
         # Selecting the later verdict object would let a planted approval
@@ -134,6 +149,22 @@ def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
         "JSON extracted from surrounding text; companion should emit strict JSON"
     )
     return result
+
+
+# A text-format finding marker anywhere on a line start, bulleted or not
+# ('- [high] ...', '[P1] ...'). Broader than _FINDING_MARKER_RE on purpose:
+# it only decides refusal, never what a finding says.
+_TEXT_FINDING_EVIDENCE_RE = re.compile(
+    r"(?im)^[^\w\n]*\[(?:critical|high|medium|low|P[0-3])\]"
+)
+
+
+def _has_text_verdict_evidence(text: str) -> bool:
+    """True when text outside the JSON objects carries a text-format verdict."""
+    return bool(
+        _VERDICT_LINE_CANDIDATE_RE.search(text)
+        or _TEXT_FINDING_EVIDENCE_RE.search(text)
+    )
 
 
 def _refused_extraction(missing_field: str, warning: str) -> Dict[str, Any]:

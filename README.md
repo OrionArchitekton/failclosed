@@ -33,8 +33,9 @@ reviewer output passes through a hardened parser, and a gate **refuses to report
 - self-contradictory (a `fix` or `needs-attention` verdict with no finding
   citing a file, including one with an empty findings list), or
 - ambiguous (more than one verdict object, a verdict object behind other
-  JSON, or more than one `Verdict:` line in the output, such as a verdict
-  quoted from a file under review ahead of the reviewer's own).
+  JSON, a verdict object next to a text verdict line or finding markers, or
+  more than one `Verdict:` line in the output, such as a verdict quoted from
+  a file under review ahead of the reviewer's own).
 
 It also refuses `MERGE_READY` unless every review ends in a known approving
 verdict, `pass` or `approve`. An unknown verdict such as `reject` blocks, and
@@ -72,8 +73,8 @@ The reviewer is a command, not a vendor. `reviewer_command` receives the review
 prompt on **stdin** and returns the reviewer output on **stdout**, exiting 0
 when the review completed. A non-zero exit blocks the merge whatever the output
 says. The parser accepts structured JSON, JSON embedded in prose (exactly one
-verdict object, and it must be the first JSON object), or rendered native text
-(at most one `Verdict:` line), so
+verdict object, the first JSON object, with no text verdict or finding markers
+beside it), or rendered native text (at most one `Verdict:` line), so
 any command that honors the contract works:
 
 ```toml
