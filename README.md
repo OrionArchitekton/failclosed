@@ -28,8 +28,9 @@ reviewer output passes through a hardened parser, and a gate **refuses to report
 
 - unparseable,
 - schema-invalid (a required field is missing; a null, blank, or non-string
-  verdict counts as missing, and a finding severity must be `critical`,
-  `high`, `medium`, `low`, or the P-level `P0` to `P3`),
+  verdict counts as missing, `findings` must be a list of objects, and a
+  finding severity must be `critical`, `high`, `medium`, `low`, or the
+  P-level `P0` to `P3`),
 - self-contradictory (a `fix` or `needs-attention` verdict with no finding
   citing a file, including one with an empty findings list), or
 - ambiguous (more than one verdict object, a verdict object behind other

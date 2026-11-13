@@ -8,7 +8,7 @@ behavior changes).
 
 ### Fixed
 
-Nine **fail-open** paths, each of which ended `MERGE_READY`. They share one
+Ten **fail-open** paths, each of which ended `MERGE_READY`. They share one
 root: the gate enumerated bad states and read missing evidence as clean. It now
 admits `MERGE_READY` only on positive evidence that every required phase ran,
 reported success, and carried the fields it must; anything else is
@@ -70,6 +70,12 @@ reported success, and carried the fields it must; anything else is
   under review silenced the reviewer's own `Verdict: fix` line or finding
   markers (current Codex prints markers and no verdict line). A JSON verdict
   object next to a text verdict line or finding markers is now refused as
+  `parse_error`.
+- **Fail-open: a malformed `findings` field read as an empty review.** A
+  `findings` value of `null`, a string, a number or an object was coerced to
+  an empty list, and list entries that were not objects were skipped, both
+  without a schema error. So `{"verdict": "pass", "findings": null}` reached
+  `MERGE_READY`. `findings` must now be a list of objects; anything else is
   `parse_error`.
 
 ### Added

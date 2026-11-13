@@ -222,15 +222,21 @@ def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
     if "findings" not in data:
         missing.append("findings")
 
-    raw_findings = data.get("findings") or []
+    # findings must be a list of objects. A null, a scalar, or an entry that
+    # is not an object is malformed evidence, not an empty review: coercing it
+    # to an empty list would let a "pass" over a broken payload clear the gate.
+    raw_findings = data.get("findings", [])
     if not isinstance(raw_findings, list):
         parse_warnings.append("findings is not a list; treating as empty")
+        if "findings" in data:
+            missing.append("findings_list")
         raw_findings = []
 
     findings: List[Dict[str, Any]] = []
     for i, f in enumerate(raw_findings):
         if not isinstance(f, dict):
             parse_warnings.append(f"finding[{i}] is not a dict; skipped")
+            missing.append(f"finding[{i}]")
             continue
         # Per-finding required-key check. A severity must name a level in the
         # enum, or the P-level alias of one (P0 is critical). Anything else is

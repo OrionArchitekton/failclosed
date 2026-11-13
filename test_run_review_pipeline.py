@@ -348,3 +348,15 @@ def test_json_verdict_in_plain_prose_still_reaches_merge_ready(tmp_path, monkeyp
     output = f"My review follows.\n{CLEAN_PASS}\nNo issues found.\n"
     report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
     assert report["status"] == "MERGE_READY", report["status"]
+
+
+# --- Defect 10: a malformed findings field was coerced to an empty list ---
+
+def test_findings_not_a_list_of_objects_blocks_merge_ready(tmp_path, monkeypatch):
+    print("THREEWAY-RAN:findings-shape")
+    for findings in (None, "src/auth.py: auth bypass", 42, {}, [42], ["src/auth.py: bypass"]):
+        output = json.dumps({"verdict": "pass", "findings": findings})
+        report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+        assert report["status"] == "FINDINGS_REMAIN", (findings, report["status"])
+        assert report["phases"]["2_standard"]["status"] == "parse_error", findings
+    print("THREEWAY-PASS:findings-shape")
