@@ -211,6 +211,10 @@ def _unparseable_result(parse_warnings: List[str]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _VERDICT_RE = re.compile(r"(?im)^verdict\s*:[ \t]*(.+?)[ \t]*$")
+# Any line that looks like a verdict header, decorated or not ('Verdict:',
+# '**Verdict**:', '## Verdict:', '> Verdict:'). Used only to count candidate
+# verdict lines; more than one is refused rather than first-wins.
+_VERDICT_LINE_CANDIDATE_RE = re.compile(r"(?im)^[^\w\n]*verdict[^\w\n]*:")
 _FINDING_MARKER_RE = re.compile(
     r"(?im)^[-*]\s*\[(critical|high|medium|low|P[0-3])\]\s*"
     r"(?P<rest>.*?)$"
@@ -326,6 +330,23 @@ def parse_native_review_stdout(stdout: str) -> Dict[str, Any]:
     """
     if not stdout or not stdout.strip():
         return _unparseable_result(["empty native-review stdout"])
+
+    # More than one verdict line (agreeing or not) is refused: text quoted
+    # from the code under review can carry a 'Verdict: pass' line, and taking
+    # the first one would let planted text decide the review.
+    verdict_lines = len(_VERDICT_LINE_CANDIDATE_RE.findall(stdout))
+    if verdict_lines > 1:
+        return {
+            "verdict": None,
+            "findings": [],
+            "parseable": True,
+            "parse_path": "native_text",
+            "schema_valid": False,
+            "missing_fields": ["single_verdict_line"],
+            "parse_warnings": [
+                f"{verdict_lines} verdict lines in native-review stdout; refusing to pick one"
+            ],
+        }
 
     verdict_match = _VERDICT_RE.search(stdout)
     # Normalize verdict to lowercase + strip surrounding quotes/punctuation so

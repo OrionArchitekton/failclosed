@@ -321,6 +321,26 @@ class TestNativeReviewParsing:
         assert f["file"] == "src/db.py"
         assert f["line_start"] == 7
 
+    def test_more_than_one_verdict_line_refused(self):
+        for stdout in (
+            "Verdict: pass\nVerdict: fix\n- [high] src/a.py:1 Real issue\n",
+            "Verdict: pass\n## **Verdict**: fix\n",
+            "Verdict: approve\n> Verdict: approve\n",
+        ):
+            result = parse_native_review_stdout(stdout)
+            assert result["parse_path"] == "native_text"
+            assert result["parseable"] is True
+            assert result["schema_valid"] is False, stdout
+            assert "single_verdict_line" in result["missing_fields"]
+            assert result["verdict"] is None
+            assert result["findings"] == []
+
+    def test_single_verdict_line_with_verdict_word_in_prose_still_parses(self):
+        stdout = "Verdict: approve\nThe earlier verdict: fix was withdrawn.\n"
+        result = parse_native_review_stdout(stdout)
+        assert result["schema_valid"] is True
+        assert result["verdict"] == "approve"
+
     def test_p_level_finding_without_file_fails_closed(self):
         # A P-level finding (verdict implied 'fix') whose parser extracts no file is
         # a contradictory state -> schema_valid False so the gate blocks MERGE_READY.
