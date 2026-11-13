@@ -88,7 +88,9 @@ def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
     "verdict" key. More than one candidate is refused rather than guessed
     at: text quoted from the code under review can carry an object shaped
     like a verdict, and picking one would let planted text decide the
-    review. Otherwise the first object is validated, as before. Signals
+    review. A single candidate must also be the first object: picking a
+    later one would let a planted approval win behind any other JSON.
+    Otherwise the first object is validated, as before. Signals
     companion-emit drift via parse_warnings.
     """
     objects: List[dict] = []
@@ -113,28 +115,44 @@ def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
 
     candidates = sum(1 for obj in objects if "verdict" in obj)
     if candidates > 1:
-        # parseable=True with schema_valid=False makes the pipeline report
-        # parse_error directly. parseable=False would send the output on to
-        # the native text parser, a second chance for planted text (a quoted
-        # 'Verdict: pass' line) to be read as the verdict.
-        return {
-            "verdict": None,
-            "findings": [],
-            "parseable": True,
-            "parse_path": "json_extracted",
-            "schema_valid": False,
-            "missing_fields": ["single_verdict_object"],
-            "parse_warnings": [
-                f"{candidates} candidate verdict objects in surrounding text; "
-                "refusing to pick one"
-            ],
-        }
+        return _refused_extraction(
+            "single_verdict_object",
+            f"{candidates} candidate verdict objects in surrounding text; "
+            "refusing to pick one",
+        )
+    if candidates == 1 and "verdict" not in objects[0]:
+        # Selecting the later verdict object would let a planted approval
+        # win whenever any other JSON object precedes it.
+        return _refused_extraction(
+            "verdict_object_first",
+            "the verdict object is not the first JSON object in surrounding "
+            "text; refusing to pick it",
+        )
 
     result = _validate_and_finalize(objects[0], parse_path="json_extracted")
     result["parse_warnings"].append(
         "JSON extracted from surrounding text; companion should emit strict JSON"
     )
     return result
+
+
+def _refused_extraction(missing_field: str, warning: str) -> Dict[str, Any]:
+    """An extraction refused as ambiguous.
+
+    parseable=True with schema_valid=False makes the pipeline report
+    parse_error directly. parseable=False would send the output on to the
+    native text parser, a second chance for planted text (a quoted
+    'Verdict: pass' line) to be read as the verdict.
+    """
+    return {
+        "verdict": None,
+        "findings": [],
+        "parseable": True,
+        "parse_path": "json_extracted",
+        "schema_valid": False,
+        "missing_fields": [missing_field],
+        "parse_warnings": [warning],
+    }
 
 
 def normalize_verdict(verdict: Any) -> Optional[str]:

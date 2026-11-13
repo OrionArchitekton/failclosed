@@ -8,7 +8,7 @@ behavior changes).
 
 ### Fixed
 
-Seven **fail-open** paths, each of which ended `MERGE_READY`. They share one
+Eight **fail-open** paths, each of which ended `MERGE_READY`. They share one
 root: the gate enumerated bad states and read missing evidence as clean. It now
 admits `MERGE_READY` only on positive evidence that every required phase ran,
 reported success, and carried the fields it must; anything else is
@@ -37,8 +37,10 @@ reported success, and carried the fields it must; anything else is
   so a verdict object quoted ahead of the reviewer's own (for example, from a
   file under review) decided the review. More than one top-level object with a
   `verdict` key is now refused as `parse_error` instead of guessed at, without
-  falling back to the native text parser. Strict single-object JSON, and prose
-  with exactly one verdict object, parse as before.
+  falling back to the native text parser. So is a single verdict object that
+  is not the first JSON object in the prose: picking it would let a planted
+  approval win behind any other JSON. Strict single-object JSON, and prose
+  whose first JSON object is its only verdict object, parse as before.
 - **Fail-open: the first plain-text `Verdict:` line won.** The native text
   parser took the first `Verdict:` line, so a `Verdict: pass` quoted ahead of
   the reviewer's own verdict decided the review. More than one verdict line,
@@ -56,6 +58,12 @@ reported success, and carried the fields it must; anything else is
   `MERGE_READY`. Behavior change: a `fix` or `needs-attention` verdict whose
   findings all sit below `fix_threshold` now blocks (`FINDINGS_REMAIN` with no
   fix requests) instead of clearing the gate.
+- **Fail-open: a P-level or unknown finding severity was dropped.** On the JSON
+  paths a finding's severity was checked only for presence, and the threshold
+  filter reads an unknown severity as below every threshold. So a `pass`
+  verdict carrying a `P0` finding produced no fix request and reached
+  `MERGE_READY`. A P-level now maps to its severity (`P0` is `critical`), and
+  any other value, including a non-string, is schema-invalid (`parse_error`).
 
 ### Added
 
