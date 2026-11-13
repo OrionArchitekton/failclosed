@@ -6,6 +6,89 @@ behavior changes).
 
 ## [Unreleased]
 
+### Fixed
+
+Twelve **fail-open** paths, each of which ended `MERGE_READY`. They share one
+root: the gate enumerated bad states and read missing evidence as clean. It now
+admits `MERGE_READY` only on positive evidence that every required phase ran,
+reported success, and carried the fields it must; anything else is
+`FINDINGS_REMAIN`.
+
+- **Fail-open: `fix` verdict with an empty findings list on the JSON path.** The
+  rule that a `fix` or `needs-attention` verdict must carry a finding citing a
+  file existed only on the native text path. The strict-JSON and extracted-JSON
+  paths now apply it too (verdict compared case-insensitively), so the phase
+  reports `parse_error`.
+- **Fail-open: an errored bot-thread phase read as zero open threads.** When
+  phase 1 or phase 5 failed (for example, `gh` not authenticated), the missing
+  `remaining_threads` count defaulted to 0. Both thread phases must now report
+  `ok`, and phase 5 must carry an integer count.
+- **Fail-open: a reviewer that cannot run.** A reviewer command that could not
+  start left both review phases at `error`, and the gate blocked only on
+  `parse_error` or `timeout`. The reviewer's exit code was not read, so a clean
+  verdict printed before a non-zero exit cleared the gate. A non-zero exit is
+  now a phase `error` (with its `returncode`), and every required review phase
+  must report `ok`; the adversarial phase is required unless
+  `adversarial_review` is off. Behavior change: an empty `reviewer_command`
+  (phases `skipped`) and `--dry-run` (phases `dry_run`, the reviewer never runs)
+  no longer report `MERGE_READY`.
+- **Fail-open: a planted verdict object in prose won.** For output that is
+  prose with JSON in it, the parser took the first JSON object it could decode,
+  so a verdict object quoted ahead of the reviewer's own (for example, from a
+  file under review) decided the review. More than one top-level object with a
+  `verdict` key is now refused as `parse_error` instead of guessed at, without
+  falling back to the native text parser. So is a single verdict object that
+  is not the first JSON object in the prose: picking it would let a planted
+  approval win behind any other JSON. Strict single-object JSON, and prose
+  whose first JSON object is its only verdict object, parse as before.
+- **Fail-open: the first plain-text `Verdict:` line won.** The native text
+  parser took the first `Verdict:` line, so a `Verdict: pass` quoted ahead of
+  the reviewer's own verdict decided the review. More than one verdict line,
+  agreeing or not and decorated or not (`**Verdict**:`, `## Verdict:`,
+  `> Verdict:`), is now refused as `parse_error`.
+- **Fail-open: a null or missing verdict.** On the JSON paths only a missing
+  `verdict` key was flagged; a null, blank, or non-string verdict was schema
+  valid. It now counts as missing (`parse_error`). On the native text path,
+  finding markers with no `Verdict:` line still imply `fix` (current Codex
+  output has no verdict line), which is not an approval.
+- **Fail-open: any verdict value cleared the gate.** The gate never checked
+  the verdict, so an unknown verdict such as `reject`, with no findings or
+  only below-threshold ones, was `MERGE_READY`. Only a known approving
+  verdict, `pass` or `approve` (case-insensitive), can now reach
+  `MERGE_READY`. Behavior change: a `fix` or `needs-attention` verdict whose
+  findings all sit below `fix_threshold` now blocks (`FINDINGS_REMAIN` with no
+  fix requests) instead of clearing the gate.
+- **Fail-open: a P-level or unknown finding severity was dropped.** On the JSON
+  paths a finding's severity was checked only for presence, and the threshold
+  filter reads an unknown severity as below every threshold. So a `pass`
+  verdict carrying a `P0` finding produced no fix request and reached
+  `MERGE_READY`. A P-level now maps to its severity (`P0` is `critical`), and
+  any other value, including a non-string, is schema-invalid (`parse_error`).
+- **Fail-open: one quoted JSON approval beat the reviewer's text verdict.**
+  With a single verdict object in prose, the parser took it without looking
+  at the rest of the output, so a `{"verdict": "pass"}` quoted from a file
+  under review silenced the reviewer's own `Verdict: fix` line or finding
+  markers (current Codex prints markers and no verdict line). A JSON verdict
+  object next to a text verdict line or finding markers is now refused as
+  `parse_error`.
+- **Fail-open: a malformed `findings` field read as an empty review.** A
+  `findings` value of `null`, a string, a number or an object was coerced to
+  an empty list, and list entries that were not objects were skipped, both
+  without a schema error. So `{"verdict": "pass", "findings": null}` reached
+  `MERGE_READY`. `findings` must now be a list of objects; anything else is
+  `parse_error`.
+- **Fail-open: an approval over a finding with no file.** A finding at or
+  above `fix_threshold` that cites no file produces no fix request, and the
+  gate counted only fix requests, so `pass` with a high finding whose `file`
+  is null (or `Verdict: pass` with a pathless `- [high]` marker) reached
+  `MERGE_READY`. Behavior change: it now blocks (`FINDINGS_REMAIN`), and the
+  finding is listed under `unfixable`.
+- **Fail-open: an unknown bracket marker escaped the mixed-format check.** The
+  check above recognized only known severities, so `- [blocker] src/auth.py:7
+  ...` beside a JSON `pass` was ignored and the approval reached
+  `MERGE_READY`. Any bracketed word at a line start now counts as text
+  evidence (a markdown checkbox does too, which only blocks).
+
 ### Added
 
 - **Three-way fix proof** (`three_way_proof.py`). A fix only counts when its

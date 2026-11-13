@@ -10,14 +10,18 @@ trunk_branches = ["main", "master"]
 # Reviewer provider seam. The command receives the review prompt on STDIN and
 # must return the reviewer's output on STDOUT. failclosed does not trust the
 # reviewer's verdict: the output is parsed, and the gate refuses MERGE_READY on
-# unparseable, schema-invalid, or self-contradictory output. Any command that
-# honors the stdin -> stdout contract works. The seam is vendor-neutral.
+# unparseable, schema-invalid, self-contradictory, or ambiguous output, and on
+# any verdict other than "pass" or "approve". The command must exit 0. Any
+# command that honors the stdin -> stdout contract works. The seam is
+# vendor-neutral.
 reviewer_command = "codex exec --json -"
 
 # Seconds to wait for review bots to land before the first phase.
 bot_wait_seconds = 240
 
-# Findings at or above this priority are auto-fixed. Lower are informational.
+# Findings at or above this priority become fix requests. Lower ones do not,
+# but they never clear the gate on their own: only a "pass" or "approve"
+# verdict reaches MERGE_READY.
 fix_threshold = "P2"
 
 # Per-review subprocess timeout, in seconds.

@@ -52,8 +52,10 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from graphql_helpers import reply_and_resolve
 from parse_codex_output import (
+    APPROVING_VERDICTS,
     _unparseable_result,
     fixable_findings,
+    normalize_verdict,
     parse_codex_review,
     parse_native_review_stdout,
     unfixable_findings,
@@ -394,6 +396,18 @@ def phase2_review(
         output.encode("utf-8", errors="replace")
     ).hexdigest()[:16]
 
+    # A reviewer that exits non-zero did not complete its review; whatever it
+    # printed is not a verdict to trust, even a clean-looking one.
+    if result.returncode != 0:
+        return {
+            "status": "error",
+            "error": f"reviewer exited with code {result.returncode}",
+            "returncode": result.returncode,
+            "raw_output": output[:2000],
+            "stderr": result.stderr[:1000] if result.stderr else "",
+            "raw_output_hash": raw_output_hash,
+        }
+
     # The reviewer output may be structured JSON or rendered text. Try the
     # structured parser first; if it produces nothing parseable, fall back to
     # the native (rendered-text) parser. Either way the fail-closed gate below
@@ -484,17 +498,30 @@ def determine_status(
 ) -> str:
     """Determine final pipeline status.
 
-    review_phase_failed: True when any review phase has status in
-    {"parse_error", "timeout"}. The phase-level fail-closed gate would
+    review_phase_failed: True when any required review phase has a status
+    other than "ok" (parse_error, timeout, error, skipped, dry_run). The
+    phase-level fail-closed gate would
     otherwise be inert — a parse-failed phase produces zero fix_requests,
     so findings_remain stays False, and the pipeline would falsely
     report MERGE_READY.
+
+    The bot-thread phases need positive evidence too: phase 1 and phase 5
+    must each report status "ok", and phase 5 must carry an integer
+    remaining_threads count. An errored phase has no count, and reading the
+    missing count as zero would clear the gate with threads unchecked.
     """
-    remaining = phase5.get("remaining_threads", 0)
     if review_phase_failed:
         return "FINDINGS_REMAIN"
-    if remaining == 0 and not findings_remain:
-        return "MERGE_READY"
+    remaining = phase5.get("remaining_threads")
+    threads_checked = (
+        phase1.get("status") == "ok"
+        and phase5.get("status") == "ok"
+        and isinstance(remaining, int)
+        and not isinstance(remaining, bool)
+        and remaining >= 0
+    )
+    if not threads_checked:
+        return "FINDINGS_REMAIN"
     if findings_remain:
         return "FINDINGS_REMAIN"
     if remaining > 0:
@@ -664,11 +691,29 @@ def run_pipeline(
     report["phases"]["5_final_sweep"] = p5
 
     # --- Determine status ---
-    review_phase_failed = any(
-        p.get("status") in ("parse_error", "timeout")
-        for p in (p2, p3)
+    # Positive evidence only: every required review phase must report "ok".
+    # Any other status (parse_error, timeout, error, skipped, dry_run) means
+    # no trustworthy review ran. The adversarial phase is required unless the
+    # config disables it.
+    required_reviews = [p2] + ([p3] if config["adversarial_review"] else [])
+    review_phase_failed = any(p.get("status") != "ok" for p in required_reviews)
+    # Only a known approving verdict can clear the gate. An unknown verdict
+    # ("reject"), or a fix verdict whose findings all sit below fix_threshold,
+    # yields no fix request, but it is not an approval either.
+    review_approved = all(
+        normalize_verdict(p.get("verdict")) in APPROVING_VERDICTS
+        for p in required_reviews
     )
-    status = determine_status(p1, findings_remain, p5, review_phase_failed)
+    # A finding at or above fix_threshold that cites no file yields no fix
+    # request, but it is still a finding: an approving verdict over it is not
+    # a clean review. It blocks, and the report lists it under "unfixable".
+    unfixable_remain = any(p.get("unfixable_findings") for p in required_reviews)
+    status = determine_status(
+        p1,
+        findings_remain or unfixable_remain or not review_approved,
+        p5,
+        review_phase_failed,
+    )
     report["status"] = status
     report["fix_requests"] = fix_requests
     report["unfixable"] = (

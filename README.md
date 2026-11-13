@@ -27,8 +27,30 @@ reviewer output passes through a hardened parser, and a gate **refuses to report
 `MERGE_READY`** when the output is:
 
 - unparseable,
-- schema-invalid, or
-- self-contradictory (a `fix` verdict with no finding citing a file).
+- schema-invalid (a required field is missing; a null, blank, or non-string
+  verdict counts as missing, `findings` must be a list of objects, and a
+  finding severity must be `critical`, `high`, `medium`, `low`, or the
+  P-level `P0` to `P3`),
+- self-contradictory (a `fix` or `needs-attention` verdict with no finding
+  citing a file, including one with an empty findings list), or
+- ambiguous (more than one verdict object, a verdict object behind other
+  JSON, a verdict object next to a text verdict line or any bracketed finding
+  marker, an unknown severity included, or more than one `Verdict:` line in
+  the output, such as a verdict quoted from a file under review ahead of the
+  reviewer's own).
+
+It also refuses `MERGE_READY` unless every review ends in a known approving
+verdict, `pass` or `approve`. An unknown verdict such as `reject` blocks, and
+so does a `fix` or `needs-attention` verdict even when all its findings sit
+below `fix_threshold`. An approving verdict that carries a finding at or above
+`fix_threshold` with no file blocks too: there is nothing to auto-fix, so the
+report lists it under `unfixable` for a person to read. And it refuses when any required phase failed or did
+not report: a reviewer that cannot start, exits non-zero, times out, or is
+skipped (an empty `reviewer_command`, or a `--dry-run`, which never runs the
+reviewer), a bot-thread phase that errors, and a final sweep that reports no
+open-thread count. `MERGE_READY` needs positive evidence that every required
+phase ran and succeeded; the adversarial pass is required unless
+`adversarial_review` is off.
 
 Enforcement precedes the merge decision. When the review cannot be deterministically
 evaluated, the merge does not proceed. That is the whole point: a merge that can
@@ -40,8 +62,10 @@ It runs one path, with no advisory fallback:
 2. **Run the reviewer** (standard pass, then an adversarial pass) through a
    configurable command seam.
 3. **Parse** the output through the multi-shape parser.
-4. **Fail-closed gate**: any unparseable / schema-invalid / contradictory result
-   becomes a `parse_error`, which blocks `MERGE_READY`.
+4. **Fail-closed gate**: any unparseable / schema-invalid / contradictory /
+   ambiguous result becomes a `parse_error`, which blocks `MERGE_READY`, and
+   so does any required phase that did not report success or any verdict
+   that is not an approval.
 5. **Emit fix requests** (structured; the agent applies them — failclosed does
    not edit code inline).
 6. **Resolve bot threads** via the GitHub GraphQL API.
@@ -50,9 +74,12 @@ It runs one path, with no advisory fallback:
 ## The reviewer seam
 
 The reviewer is a command, not a vendor. `reviewer_command` receives the review
-prompt on **stdin** and returns the reviewer output on **stdout**. The parser
-accepts structured JSON, JSON embedded in prose, or rendered native text, so any
-command that honors the contract works:
+prompt on **stdin** and returns the reviewer output on **stdout**, exiting 0
+when the review completed. A non-zero exit blocks the merge whatever the output
+says. The parser accepts structured JSON, JSON embedded in prose (exactly one
+verdict object, the first JSON object, with no text verdict or finding markers
+beside it), or rendered native text (at most one `Verdict:` line), so
+any command that honors the contract works:
 
 ```toml
 reviewer_command = "codex exec --json -"
@@ -80,7 +107,8 @@ JSON
 python run_review_pipeline.py --context ctx.json --json
 ```
 
-`--dry-run` runs without writing fixes or resolving threads. `--non-blocking`
+`--dry-run` runs without running the reviewer or resolving threads, so it never
+reports `MERGE_READY`. `--non-blocking`
 returns `BOTS_PENDING` immediately when the push is younger than the bot-wait
 window instead of sleeping.
 
@@ -101,8 +129,8 @@ is required to run.
 
 | Status | Meaning |
 |---|---|
-| `MERGE_READY` | Reviewer output parsed and clean; no open fixes or threads. |
-| `FINDINGS_REMAIN` | Fixes outstanding, or a review phase failed to evaluate (fail-closed). |
+| `MERGE_READY` | Every required phase succeeded, each review's verdict is `pass` or `approve`, and no fixes or threads remain. |
+| `FINDINGS_REMAIN` | Fixes outstanding, a review verdict that is not an approval, or a required phase failed, was skipped, or did not report (fail-closed). |
 | `THREADS_UNRESOLVED` | Bot review threads still open. |
 | `BOTS_PENDING` | Push too recent for bots to have landed (non-blocking mode). |
 

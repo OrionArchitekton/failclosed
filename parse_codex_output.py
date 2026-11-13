@@ -22,6 +22,12 @@ SEVERITY_TO_PRIORITY = {
 PRIORITY_TO_SEVERITY = {v: k for k, v in SEVERITY_TO_PRIORITY.items()}
 
 SEVERITY_LEVELS = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+# The only verdicts that can clear the gate (compared after normalize_verdict).
+# The review prompt asks for 'pass'; 'approve' is the clean verdict of the
+# structured and native text contracts. Any other verdict, known ('fix',
+# 'needs-attention') or not ('reject'), is not an approval.
+APPROVING_VERDICTS = frozenset({"pass", "approve"})
 PRIORITY_LEVELS = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4}
 
 
@@ -73,30 +79,134 @@ _JSON_DECODER = json.JSONDecoder()
 
 
 def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
-    """Scan for the first valid JSON object in surrounding text.
+    """Scan surrounding text for top-level JSON objects.
 
-    Uses json.JSONDecoder().raw_decode from each '{' position — quote-aware
-    (braces inside strings don't confuse it) and retries the next candidate
-    on failure. Signals companion-emit drift via parse_warnings.
+    Uses json.JSONDecoder().raw_decode from each '{' position (quote-aware:
+    braces inside strings don't confuse it), retries the next '{' on failure,
+    and skips past each decoded object so nested objects are not counted on
+    their own. A candidate verdict object is a top-level object with a
+    "verdict" key. More than one candidate is refused rather than guessed
+    at: text quoted from the code under review can carry an object shaped
+    like a verdict, and picking one would let planted text decide the
+    review. A single candidate must also be the first object: picking a
+    later one would let a planted approval win behind any other JSON. And a
+    verdict object next to a text verdict line or finding markers outside
+    the objects is refused too: two verdicts in two formats.
+    Otherwise the first object is validated, as before. Signals
+    companion-emit drift via parse_warnings.
     """
+    objects: List[dict] = []
+    outside: List[str] = []
     pos = 0
+    scanned = 0
     while True:
         start = output.find("{", pos)
         if start < 0:
-            return None
+            break
         try:
-            data, _end = _JSON_DECODER.raw_decode(output, start)
+            data, end = _JSON_DECODER.raw_decode(output, start)
         except json.JSONDecodeError:
             pos = start + 1
             continue
         if not isinstance(data, dict):
             pos = start + 1
             continue
-        result = _validate_and_finalize(data, parse_path="json_extracted")
-        result["parse_warnings"].append(
-            "JSON extracted from surrounding text; companion should emit strict JSON"
+        objects.append(data)
+        outside.append(output[scanned:start])
+        pos = scanned = end
+    outside.append(output[scanned:])
+
+    if not objects:
+        return None
+
+    candidates = sum(1 for obj in objects if "verdict" in obj)
+    if candidates > 1:
+        return _refused_extraction(
+            "single_verdict_object",
+            f"{candidates} candidate verdict objects in surrounding text; "
+            "refusing to pick one",
         )
-        return result
+    if candidates and _has_text_verdict_evidence("\n".join(outside)):
+        # A JSON verdict next to a text verdict line or finding markers is
+        # two verdicts in two formats. Taking the JSON one would let a quoted
+        # approval silence the reviewer's own text findings.
+        return _refused_extraction(
+            "single_verdict_format",
+            "a JSON verdict object and a text verdict or finding markers in "
+            "the same output; refusing to pick one",
+        )
+    if candidates == 1 and "verdict" not in objects[0]:
+        # Selecting the later verdict object would let a planted approval
+        # win whenever any other JSON object precedes it.
+        return _refused_extraction(
+            "verdict_object_first",
+            "the verdict object is not the first JSON object in surrounding "
+            "text; refusing to pick it",
+        )
+
+    result = _validate_and_finalize(objects[0], parse_path="json_extracted")
+    result["parse_warnings"].append(
+        "JSON extracted from surrounding text; companion should emit strict JSON"
+    )
+    return result
+
+
+# A text-format finding marker on a line start, bulleted or not, with any
+# bracketed word ('- [high] ...', '[P1] ...', '- [blocker] ...'). Broader
+# than _FINDING_MARKER_RE on purpose: it only decides refusal, never what a
+# finding says, so an unknown severity counts as evidence instead of being
+# ignored. A markdown checkbox ('- [x]') also matches; that only blocks.
+_TEXT_FINDING_EVIDENCE_RE = re.compile(r"(?m)^[^\w\n]*\[[A-Za-z][\w-]*\]")
+
+
+def _has_text_verdict_evidence(text: str) -> bool:
+    """True when text outside the JSON objects carries a text-format verdict."""
+    return bool(
+        _VERDICT_LINE_CANDIDATE_RE.search(text)
+        or _TEXT_FINDING_EVIDENCE_RE.search(text)
+    )
+
+
+def _refused_extraction(missing_field: str, warning: str) -> Dict[str, Any]:
+    """An extraction refused as ambiguous.
+
+    parseable=True with schema_valid=False makes the pipeline report
+    parse_error directly. parseable=False would send the output on to the
+    native text parser, a second chance for planted text (a quoted
+    'Verdict: pass' line) to be read as the verdict.
+    """
+    return {
+        "verdict": None,
+        "findings": [],
+        "parseable": True,
+        "parse_path": "json_extracted",
+        "schema_valid": False,
+        "missing_fields": [missing_field],
+        "parse_warnings": [warning],
+    }
+
+
+def normalize_verdict(verdict: Any) -> Optional[str]:
+    """Lowercase a verdict and strip surrounding quotes and punctuation.
+
+    Returns None for a verdict that is not a string or is empty once
+    stripped: that is a missing verdict, never a clean one.
+    """
+    if not isinstance(verdict, str):
+        return None
+    return verdict.strip().strip("\"'.,;:").strip().lower() or None
+
+
+def _canonical_severity(severity: Any) -> Optional[str]:
+    """Map a severity name or P-level onto the severity enum.
+
+    Returns None for anything that is not a string naming a known level.
+    """
+    if not isinstance(severity, str):
+        return None
+    key = severity.strip().lower()
+    key = _P_LEVEL_SEVERITY.get(key, key)
+    return key if key in SEVERITY_LEVELS else None
 
 
 def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
@@ -104,30 +214,44 @@ def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
     missing: List[str] = []
     parse_warnings: List[str] = []
 
-    if "verdict" not in data:
+    # A null, non-string, or blank verdict counts as missing, not as clean.
+    verdict = data.get("verdict")
+    normalized = normalize_verdict(verdict)
+    if normalized is None:
         missing.append("verdict")
     if "findings" not in data:
         missing.append("findings")
 
-    raw_findings = data.get("findings") or []
+    # findings must be a list of objects. A null, a scalar, or an entry that
+    # is not an object is malformed evidence, not an empty review: coercing it
+    # to an empty list would let a "pass" over a broken payload clear the gate.
+    raw_findings = data.get("findings", [])
     if not isinstance(raw_findings, list):
         parse_warnings.append("findings is not a list; treating as empty")
+        if "findings" in data:
+            missing.append("findings_list")
         raw_findings = []
 
     findings: List[Dict[str, Any]] = []
     for i, f in enumerate(raw_findings):
         if not isinstance(f, dict):
             parse_warnings.append(f"finding[{i}] is not a dict; skipped")
+            missing.append(f"finding[{i}]")
             continue
-        # Per-finding required-key check
-        if "severity" not in f:
+        # Per-finding required-key check. A severity must name a level in the
+        # enum, or the P-level alias of one (P0 is critical). Anything else is
+        # a schema error: the threshold filter would read an unknown severity
+        # as below every threshold and drop the finding, so a "pass" carrying
+        # a critical finding would clear the gate.
+        severity = _canonical_severity(f.get("severity"))
+        if severity is None:
             missing.append(f"finding[{i}].severity")
         if "file" not in f:
             missing.append(f"finding[{i}].file")
         if not f.get("body") and not f.get("title"):
             missing.append(f"finding[{i}].body_or_title")
         findings.append({
-            "severity": f.get("severity", "medium"),
+            "severity": severity or f.get("severity"),
             "file": f.get("file"),
             "line_start": f.get("line_start"),
             "line_end": f.get("line_end"),
@@ -136,6 +260,16 @@ def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
             "confidence": f.get("confidence"),
             "recommendation": f.get("recommendation", ""),
         })
+
+    # Verdict-vs-findings consistency, the same rule the native text path
+    # applies: a verdict that implies actionable findings must carry at least
+    # one finding that cites a file. An empty findings list is the
+    # contradiction too, not a clean review.
+    if normalized in ("fix", "needs-attention") and not any(f.get("file") for f in findings):
+        parse_warnings.append(
+            f"verdict={verdict!r} implies findings but none cites a file"
+        )
+        missing.append("findings_with_file")
 
     schema_valid = not missing
     return {
@@ -167,6 +301,10 @@ def _unparseable_result(parse_warnings: List[str]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _VERDICT_RE = re.compile(r"(?im)^verdict\s*:[ \t]*(.+?)[ \t]*$")
+# Any line that looks like a verdict header, decorated or not ('Verdict:',
+# '**Verdict**:', '## Verdict:', '> Verdict:'). Used only to count candidate
+# verdict lines; more than one is refused rather than first-wins.
+_VERDICT_LINE_CANDIDATE_RE = re.compile(r"(?im)^[^\w\n]*verdict[^\w\n]*:")
 _FINDING_MARKER_RE = re.compile(
     r"(?im)^[-*]\s*\[(critical|high|medium|low|P[0-3])\]\s*"
     r"(?P<rest>.*?)$"
@@ -282,6 +420,23 @@ def parse_native_review_stdout(stdout: str) -> Dict[str, Any]:
     """
     if not stdout or not stdout.strip():
         return _unparseable_result(["empty native-review stdout"])
+
+    # More than one verdict line (agreeing or not) is refused: text quoted
+    # from the code under review can carry a 'Verdict: pass' line, and taking
+    # the first one would let planted text decide the review.
+    verdict_lines = len(_VERDICT_LINE_CANDIDATE_RE.findall(stdout))
+    if verdict_lines > 1:
+        return {
+            "verdict": None,
+            "findings": [],
+            "parseable": True,
+            "parse_path": "native_text",
+            "schema_valid": False,
+            "missing_fields": ["single_verdict_line"],
+            "parse_warnings": [
+                f"{verdict_lines} verdict lines in native-review stdout; refusing to pick one"
+            ],
+        }
 
     verdict_match = _VERDICT_RE.search(stdout)
     # Normalize verdict to lowercase + strip surrounding quotes/punctuation so
