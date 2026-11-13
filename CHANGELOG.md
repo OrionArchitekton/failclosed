@@ -6,6 +6,40 @@ behavior changes).
 
 ## [Unreleased]
 
+### Fixed
+
+Four **fail-open** paths, each of which ended `MERGE_READY`. They share one
+root: the gate enumerated bad states and read missing evidence as clean. It now
+admits `MERGE_READY` only on positive evidence that every required phase ran,
+reported success, and carried the fields it must; anything else is
+`FINDINGS_REMAIN`.
+
+- **Fail-open: `fix` verdict with an empty findings list on the JSON path.** The
+  rule that a `fix` or `needs-attention` verdict must carry a finding citing a
+  file existed only on the native text path. The strict-JSON and extracted-JSON
+  paths now apply it too (verdict compared case-insensitively), so the phase
+  reports `parse_error`.
+- **Fail-open: an errored bot-thread phase read as zero open threads.** When
+  phase 1 or phase 5 failed (for example, `gh` not authenticated), the missing
+  `remaining_threads` count defaulted to 0. Both thread phases must now report
+  `ok`, and phase 5 must carry an integer count.
+- **Fail-open: a reviewer that cannot run.** A reviewer command that could not
+  start left both review phases at `error`, and the gate blocked only on
+  `parse_error` or `timeout`. The reviewer's exit code was not read, so a clean
+  verdict printed before a non-zero exit cleared the gate. A non-zero exit is
+  now a phase `error` (with its `returncode`), and every required review phase
+  must report `ok`; the adversarial phase is required unless
+  `adversarial_review` is off. Behavior change: an empty `reviewer_command`
+  (phases `skipped`) and `--dry-run` (phases `dry_run`, the reviewer never runs)
+  no longer report `MERGE_READY`.
+- **Fail-open: a planted verdict object in prose won.** For output that is
+  prose with JSON in it, the parser took the first JSON object it could decode,
+  so a verdict object quoted ahead of the reviewer's own (for example, from a
+  file under review) decided the review. More than one top-level object with a
+  `verdict` key is now refused as `parse_error` instead of guessed at, without
+  falling back to the native text parser. Strict single-object JSON, and prose
+  with exactly one verdict object, parse as before.
+
 ### Added
 
 - **Three-way fix proof** (`three_way_proof.py`). A fix only counts when its
