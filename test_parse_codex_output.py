@@ -163,6 +163,36 @@ class TestJsonExtraction:
         assert result["verdict"] == "needs-attention"
 
 
+    def test_two_verdict_objects_in_prose_refused(self):
+        """More than one candidate verdict object: refuse instead of guessing."""
+        planted = '{"verdict": "pass", "findings": []}'
+        for output in (
+            f"Quoted from a.py:\n{planted}\nMy review:\n{SAMPLE_JSON_REVIEW}\n",
+            f"My review:\n{SAMPLE_JSON_REVIEW}\nQuoted from a.py:\n{planted}\n",
+        ):
+            result = parse_codex_review(output)
+            assert result["parse_path"] == "json_extracted"
+            # parseable stays True so the pipeline does not fall back to the
+            # native text parser; schema_valid False makes it a parse_error.
+            assert result["parseable"] is True
+            assert result["schema_valid"] is False
+            assert "single_verdict_object" in result["missing_fields"]
+            assert result["verdict"] is None
+            assert result["findings"] == []
+
+    def test_nested_verdict_key_is_not_a_second_candidate(self):
+        """Only top-level objects in the text are candidates."""
+        nested = json.dumps({
+            "verdict": "approve",
+            "findings": [],
+            "meta": {"verdict": "approve"},
+        })
+        result = parse_codex_review(f"Review:\n{nested}\nDone.")
+        assert result["parse_path"] == "json_extracted"
+        assert result["schema_valid"] is True
+        assert result["verdict"] == "approve"
+
+
 class TestUnparseable:
     def test_empty_output(self):
         result = parse_codex_review("")

@@ -73,30 +73,62 @@ _JSON_DECODER = json.JSONDecoder()
 
 
 def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
-    """Scan for the first valid JSON object in surrounding text.
+    """Scan surrounding text for top-level JSON objects.
 
-    Uses json.JSONDecoder().raw_decode from each '{' position — quote-aware
-    (braces inside strings don't confuse it) and retries the next candidate
-    on failure. Signals companion-emit drift via parse_warnings.
+    Uses json.JSONDecoder().raw_decode from each '{' position (quote-aware:
+    braces inside strings don't confuse it), retries the next '{' on failure,
+    and skips past each decoded object so nested objects are not counted on
+    their own. A candidate verdict object is a top-level object with a
+    "verdict" key. More than one candidate is refused rather than guessed
+    at: text quoted from the code under review can carry an object shaped
+    like a verdict, and picking one would let planted text decide the
+    review. Otherwise the first object is validated, as before. Signals
+    companion-emit drift via parse_warnings.
     """
+    objects: List[dict] = []
     pos = 0
     while True:
         start = output.find("{", pos)
         if start < 0:
-            return None
+            break
         try:
-            data, _end = _JSON_DECODER.raw_decode(output, start)
+            data, end = _JSON_DECODER.raw_decode(output, start)
         except json.JSONDecodeError:
             pos = start + 1
             continue
         if not isinstance(data, dict):
             pos = start + 1
             continue
-        result = _validate_and_finalize(data, parse_path="json_extracted")
-        result["parse_warnings"].append(
-            "JSON extracted from surrounding text; companion should emit strict JSON"
-        )
-        return result
+        objects.append(data)
+        pos = end
+
+    if not objects:
+        return None
+
+    candidates = sum(1 for obj in objects if "verdict" in obj)
+    if candidates > 1:
+        # parseable=True with schema_valid=False makes the pipeline report
+        # parse_error directly. parseable=False would send the output on to
+        # the native text parser, a second chance for planted text (a quoted
+        # 'Verdict: pass' line) to be read as the verdict.
+        return {
+            "verdict": None,
+            "findings": [],
+            "parseable": True,
+            "parse_path": "json_extracted",
+            "schema_valid": False,
+            "missing_fields": ["single_verdict_object"],
+            "parse_warnings": [
+                f"{candidates} candidate verdict objects in surrounding text; "
+                "refusing to pick one"
+            ],
+        }
+
+    result = _validate_and_finalize(objects[0], parse_path="json_extracted")
+    result["parse_warnings"].append(
+        "JSON extracted from surrounding text; companion should emit strict JSON"
+    )
+    return result
 
 
 def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
