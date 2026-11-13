@@ -131,12 +131,26 @@ def _try_extract_json(output: str) -> Optional[Dict[str, Any]]:
     return result
 
 
+def normalize_verdict(verdict: Any) -> Optional[str]:
+    """Lowercase a verdict and strip surrounding quotes and punctuation.
+
+    Returns None for a verdict that is not a string or is empty once
+    stripped: that is a missing verdict, never a clean one.
+    """
+    if not isinstance(verdict, str):
+        return None
+    return verdict.strip().strip("\"'.,;:").strip().lower() or None
+
+
 def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
     """Validate JSON shape against the contract; return canonical result."""
     missing: List[str] = []
     parse_warnings: List[str] = []
 
-    if "verdict" not in data:
+    # A null, non-string, or blank verdict counts as missing, not as clean.
+    verdict = data.get("verdict")
+    normalized = normalize_verdict(verdict)
+    if normalized is None:
         missing.append("verdict")
     if "findings" not in data:
         missing.append("findings")
@@ -173,8 +187,6 @@ def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
     # applies: a verdict that implies actionable findings must carry at least
     # one finding that cites a file. An empty findings list is the
     # contradiction too, not a clean review.
-    verdict = data.get("verdict")
-    normalized = verdict.strip().strip("\"'.,;:").lower() if isinstance(verdict, str) else None
     if normalized in ("fix", "needs-attention") and not any(f.get("file") for f in findings):
         parse_warnings.append(
             f"verdict={verdict!r} implies findings but none cites a file"

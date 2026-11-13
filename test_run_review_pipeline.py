@@ -219,3 +219,30 @@ def test_multiple_verdict_lines_in_text_block_merge_ready(tmp_path, monkeypatch)
         assert report["status"] == "FINDINGS_REMAIN", (name, report["status"])
         assert report["phases"]["2_standard"]["status"] == "parse_error", name
     print("THREEWAY-PASS:multiple-verdict-lines")
+
+
+# --- Defect 6: a null or missing verdict was admitted ---
+
+LOW_FILE_FINDING = {
+    "severity": "low",
+    "file": "a.py",
+    "line_start": 1,
+    "title": "Nit",
+    "body": "Minor style nit.",
+}
+
+
+def test_null_or_missing_verdict_blocks_merge_ready(tmp_path, monkeypatch):
+    print("THREEWAY-RAN:null-or-missing-verdict")
+    outputs = {
+        "null, no findings": json.dumps({"verdict": None, "findings": []}),
+        "null, low finding": json.dumps({"verdict": None, "findings": [LOW_FILE_FINDING]}),
+        "empty string": json.dumps({"verdict": "", "findings": []}),
+        "missing, low finding": json.dumps({"findings": [LOW_FILE_FINDING]}),
+        "text, no verdict line or findings": "Looked at the diff; nothing to add.\n",
+    }
+    for name, output in outputs.items():
+        report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+        assert report["status"] == "FINDINGS_REMAIN", (name, report["status"])
+        assert report["phases"]["2_standard"]["status"] == "parse_error", name
+    print("THREEWAY-PASS:null-or-missing-verdict")

@@ -128,6 +128,12 @@ class TestStrictJsonParse:
             assert result["schema_valid"] is False, verdict
             assert "findings_with_file" in result["missing_fields"]
 
+    def test_strict_json_null_or_non_string_verdict_is_missing(self):
+        for verdict in (None, "", "   ", '""', 0, [], {}):
+            result = parse_codex_review(json.dumps({"verdict": verdict, "findings": []}))
+            assert result["schema_valid"] is False, verdict
+            assert "verdict" in result["missing_fields"], verdict
+
     def test_strict_json_findings_not_list_warns_and_treats_as_empty(self):
         output = '{"verdict":"fix","findings":"not-a-list"}'
         result = parse_codex_review(output)
