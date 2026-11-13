@@ -148,6 +148,18 @@ def normalize_verdict(verdict: Any) -> Optional[str]:
     return verdict.strip().strip("\"'.,;:").strip().lower() or None
 
 
+def _canonical_severity(severity: Any) -> Optional[str]:
+    """Map a severity name or P-level onto the severity enum.
+
+    Returns None for anything that is not a string naming a known level.
+    """
+    if not isinstance(severity, str):
+        return None
+    key = severity.strip().lower()
+    key = _P_LEVEL_SEVERITY.get(key, key)
+    return key if key in SEVERITY_LEVELS else None
+
+
 def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
     """Validate JSON shape against the contract; return canonical result."""
     missing: List[str] = []
@@ -171,15 +183,20 @@ def _validate_and_finalize(data: dict, *, parse_path: str) -> Dict[str, Any]:
         if not isinstance(f, dict):
             parse_warnings.append(f"finding[{i}] is not a dict; skipped")
             continue
-        # Per-finding required-key check
-        if "severity" not in f:
+        # Per-finding required-key check. A severity must name a level in the
+        # enum, or the P-level alias of one (P0 is critical). Anything else is
+        # a schema error: the threshold filter would read an unknown severity
+        # as below every threshold and drop the finding, so a "pass" carrying
+        # a critical finding would clear the gate.
+        severity = _canonical_severity(f.get("severity"))
+        if severity is None:
             missing.append(f"finding[{i}].severity")
         if "file" not in f:
             missing.append(f"finding[{i}].file")
         if not f.get("body") and not f.get("title"):
             missing.append(f"finding[{i}].body_or_title")
         findings.append({
-            "severity": f.get("severity", "medium"),
+            "severity": severity or f.get("severity"),
             "file": f.get("file"),
             "line_start": f.get("line_start"),
             "line_end": f.get("line_end"),

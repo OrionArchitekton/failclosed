@@ -280,3 +280,39 @@ def test_known_approving_verdicts_still_reach_merge_ready(tmp_path, monkeypatch)
     for name, output in outputs.items():
         report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
         assert report["status"] == "MERGE_READY", (name, report["status"])
+
+
+# --- Defect 8: a P-level or unknown severity on the JSON path was dropped ---
+
+def _finding(severity) -> dict:
+    return {
+        "severity": severity,
+        "file": "src/auth.py",
+        "line_start": 3,
+        "title": "Auth bypass",
+        "body": "src/auth.py skips the token check.",
+    }
+
+
+def test_p_level_or_unknown_severity_blocks_merge_ready(tmp_path, monkeypatch):
+    print("THREEWAY-RAN:severity-canonical")
+    # A P-level is the documented alias of a severity name: P0 is critical.
+    output = json.dumps({"verdict": "pass", "findings": [_finding("P0")]})
+    report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+    assert report["status"] == "FINDINGS_REMAIN", report["status"]
+    assert len(report["fix_requests"]) == 2
+    assert {r["severity"] for r in report["fix_requests"]} == {"critical"}
+
+    # A severity outside the enum is a schema error, never a dropped finding.
+    for severity in ("blocker", 3, None, ""):
+        output = json.dumps({"verdict": "pass", "findings": [_finding(severity)]})
+        report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+        assert report["status"] == "FINDINGS_REMAIN", (severity, report["status"])
+        assert report["phases"]["2_standard"]["status"] == "parse_error", severity
+    print("THREEWAY-PASS:severity-canonical")
+
+
+def test_named_and_titlecase_severities_still_filter_as_before(tmp_path, monkeypatch):
+    output = json.dumps({"verdict": "pass", "findings": [_finding("Low"), _finding("p3")]})
+    report = _run(tmp_path, monkeypatch, _reviewer_replaying(tmp_path, output))
+    assert report["status"] == "MERGE_READY", report["status"]
